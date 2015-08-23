@@ -67,6 +67,10 @@ libcls_journal_client_la_SOURCES = \
 noinst_LTLIBRARIES += libcls_journal_client.la
 DENCODER_DEPS += libcls_journal_client.la
 
+libcls_zlog_client_la_SOURCES = \
+	cls/zlog/cls_zlog_client.cc
+lib_LTLIBRARIES += libcls_zlog_client.la
+
 noinst_HEADERS += \
 	cls/lock/cls_lock_types.h \
 	cls/lock/cls_lock_ops.h \
