@@ -85,10 +85,10 @@ void cls_zlog_max_position(librados::ObjectReadOperation& op, uint64_t epoch,
   op.exec("zlog", "max_position", in, new ClsZlogMaxPositionReply(pposition, pret));
 }
 
-int cls_zlog_set_projection(librados::IoCtx& ioctx, const std::string& oid)
+void cls_zlog_set_projection(librados::ObjectWriteOperation& op)
 {
-  bufferlist inbl, outbl;
-  return ioctx.exec(oid, "zlog", "set_projection", inbl, outbl);
+  bufferlist in;
+  op.exec("zlog", "set_projection", in);
 }
 
 int cls_zlog_get_projection(librados::IoCtx& ioctx, const std::string& oid, uint64_t *pepoch)
