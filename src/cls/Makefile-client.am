@@ -105,4 +105,5 @@ noinst_HEADERS += \
 	cls/cephfs/cls_cephfs.h \
 	cls/cephfs/cls_cephfs_client.h \
 	cls/journal/cls_journal_client.h \
-	cls/journal/cls_journal_types.h
+	cls/journal/cls_journal_types.h \
+	cls/zlog/cls_zlog_client.h

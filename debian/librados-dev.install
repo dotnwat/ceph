@@ -12,3 +12,7 @@ usr/lib/librados.a
 usr/lib/librados.la
 usr/lib/librados.so
 usr/share/man/man8/librados-config.8
+usr/include/rados/cls_zlog_client.h
+usr/lib/libcls_zlog_client.a
+usr/lib/libcls_zlog_client.la
+usr/lib/libcls_zlog_client.so
