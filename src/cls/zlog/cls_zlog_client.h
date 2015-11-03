@@ -29,6 +29,9 @@ namespace zlog {
   void cls_zlog_read(librados::ObjectReadOperation& op, uint64_t epoch,
       uint64_t position);
 
+  void cls_zlog_trim(librados::ObjectWriteOperation& op, uint64_t epoch,
+      uint64_t position);
+
   void cls_zlog_max_position(librados::ObjectReadOperation& op, uint64_t epoch,
       uint64_t *pposition, int *pret);
 

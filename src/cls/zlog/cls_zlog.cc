@@ -5,9 +5,72 @@
 #include "cls_zlog_client.h"
 
 /*
+ * FIXME:
+ *  - check that epoch guard treats the current epoch as _sealed_ meaning that
+ *  operations tagged with the current epoch are rejected.
+ *
  * Improvement:
  *   - Should max pos be updated with each write, or just calculate it when
  *   asked?
+ *   - Trimming should use a watermark to mark log positions below which all
+ *   positions are trimmed so that entries that only contain a set trim bit
+ *   can be released from the index.
+ *
+ * write: write is only used for log append, and when a write fails because
+ * the entry is read-only then the append is repeated with a new position from
+ * the sequencer. written entries are explictly read-only, but junk and trim
+ * positions are also treated as read-only for the purpose of informing the
+ * client library to retry (the client never sees the read-only state during
+ * append). in the future it may be desirable to return written, trimmed, or
+ * junk instead of read-only. writing to a trimmed or junk filled position are
+ * both posibilities during race conditions.
+ *
+ * write, empty:    ok
+ * write, written:  read-only
+ * write, trimmed:  read-only
+ * write, filled:   read-only
+ *
+ * read: two use cases for read are important to distinguish. a client may be
+ * replaying a log and encounter a junk entry which would be skipped. an entry
+ * may be trimmed, too. a scanning client would skip this. however, a client
+ * should be able to see some specific state information. for instance, a
+ * client that uses a position as a pointer that should always be valid may
+ * want to know when a pointer is invalid (e.g. an assertion error).
+ *
+ * when an entry is trimmed a read will return the trimmed error. filled could
+ * return the invalidated error, but we also want to immediately trim filled
+ * locations. finally, when a range of entries is trimmed they all return
+ * trimmed meaning that entries that were filled can't have individual state
+ * tracked. so, filled should also return trimmed.
+ *
+ * NOTE: currently invalidated is returend for both trimmed and filled
+ * positions on read. per the discussion above, trimmed should be returned in
+ * both cases. for now we re-use the invalidated flag.
+ *
+ * read, empty:    not-written
+ * read, written:  ok
+ * read, trimmed:  invalidated (should be trimmed)
+ * read, filled:   invalidated (should be trimmed)
+ *
+ * fill: fill is idempotent when it is already filled. the affect of filling a
+ * trimmed position is also treated as a success because the overall effect is
+ * the same---the position cannot be read. however, if applications want the
+ * extra state information in the future (e.g. filling trimmed returns trim
+ * error) then we can add that.
+ *
+ * fill, empty:    ok
+ * fill, written:  read-only
+ * fill, trimmed:  ok
+ * fill, filled:   ok
+ *
+ * trim: trimming is like filling, but also lets users gc a position that has
+ * been written. we allow trim to always succeed, but it is debatable if trim
+ * should succeed for an empty position (since it is already unused).
+ *
+ * trim, empty:   ok
+ * trim, written: ok
+ * trim, trimmed: ok
+ * trim, filled:  ok
  */
 
 CLS_VER(1,0)
@@ -18,6 +81,7 @@ cls_method_handle_t h_seal;
 cls_method_handle_t h_fill;
 cls_method_handle_t h_write;
 cls_method_handle_t h_read;
+cls_method_handle_t h_trim;
 cls_method_handle_t h_max_position;
 
 cls_method_handle_t h_set_projection;
@@ -33,6 +97,7 @@ struct cls_zlog_log_entry {
   bufferlist data;
 
   static const int INVALIDATED = 1;
+  static const int TRIMMED     = 2;
 
   cls_zlog_log_entry() : flags(0)
   {}
@@ -175,8 +240,9 @@ static int read(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return -EIO;
   }
 
-  // the entry might have been filled
-  if (entry.flags & cls_zlog_log_entry::INVALIDATED)
+  // the entry might have been filled or invalidated.
+  if (entry.flags & cls_zlog_log_entry::INVALIDATED ||
+      entry.flags & cls_zlog_log_entry::TRIMMED)
     return CLS_ZLOG_INVALIDATED;
 
   *out = entry.data;
@@ -249,6 +315,13 @@ static int write(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return CLS_ZLOG_OK;
   }
 
+  /*
+   * currently both junk and trimmed entries are kept in the index so this
+   * works. with optimization in which ranges of trimmed entries are replaced
+   * by a small piece of metadata will require changes here because read-only
+   * is returned even though the entry won't be in the index, and hence ret ==
+   * -ENOENT as above.
+   */
   return CLS_ZLOG_READ_ONLY;
 }
 
@@ -284,6 +357,7 @@ static int fill(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   // if position hasn't been written, invalidate it
   if (ret == -ENOENT) {
     entry.flags |= cls_zlog_log_entry::INVALIDATED;
+    entry.flags |= cls_zlog_log_entry::TRIMMED;
     bufferlist entrybl;
     ::encode(entry, entrybl);
     ret = cls_cxx_map_set_val(hctx, key, &entrybl);
@@ -303,11 +377,81 @@ static int fill(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
     return -EIO;
   }
 
-  // if it is already invalidated, then report success
-  if (entry.flags & cls_zlog_log_entry::INVALIDATED)
+  // if it is already invalidated or filled, then report success
+  if (entry.flags & cls_zlog_log_entry::INVALIDATED ||
+      entry.flags & cls_zlog_log_entry::TRIMMED)
     return CLS_ZLOG_OK;
 
   return CLS_ZLOG_READ_ONLY;
+}
+
+static int trim(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  // decode input operation
+  cls_zlog_trim_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: trim(): failed to decode input");
+    return -EINVAL;
+  }
+
+  int ret = check_epoch(hctx, op.epoch);
+  if (ret) {
+    CLS_LOG(10, "NOTICE: trim(): stale epoch value");
+    return ret;
+  }
+
+  // lookup position in the omap index
+  bufferlist bl;
+  std::string key = u64tostr(op.position);
+  ret = cls_cxx_map_get_val(hctx, key, &bl);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_LOG(0, "ERROR: trim(): failed to read index");
+    return ret;
+  }
+
+  cls_zlog_log_entry entry;
+
+  // if position hasn't been written, trim it
+  if (ret == -ENOENT) {
+    entry.flags |= cls_zlog_log_entry::TRIMMED;
+    bufferlist entrybl;
+    ::encode(entry, entrybl);
+    ret = cls_cxx_map_set_val(hctx, key, &entrybl);
+    if (ret < 0) {
+      CLS_LOG(0, "ERROR: trim(): failed to write index");
+      return ret;
+    }
+    return CLS_ZLOG_OK;
+  }
+
+  // decode the entry from the index
+  try {
+    bufferlist::iterator it = bl.begin();
+    ::decode(entry, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: trim(): failed to decode log entry");
+    return -EIO;
+  }
+
+  if (entry.flags & cls_zlog_log_entry::TRIMMED)
+    return CLS_ZLOG_OK;
+
+  // if it exists then set the trim flag and delete the payload.
+  entry.data.clear();
+  entry.flags |= cls_zlog_log_entry::TRIMMED;
+
+  bufferlist entrybl;
+  ::encode(entry, entrybl);
+  ret = cls_cxx_map_set_val(hctx, key, &entrybl);
+  if (ret < 0) {
+    CLS_LOG(0, "ERROR: trim(): failed to update index");
+    return ret;
+  }
+
+  return CLS_ZLOG_OK;
 }
 
 static int seal(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
@@ -485,6 +629,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "read",
 			  CLS_METHOD_RD,
 			  read, &h_read);
+
+  cls_register_cxx_method(h_class, "trim",
+			  CLS_METHOD_RD | CLS_METHOD_WR,
+			  trim, &h_trim);
 
   cls_register_cxx_method(h_class, "max_position",
 			  CLS_METHOD_RD,
