@@ -50,6 +50,17 @@ void cls_zlog_read(librados::ObjectReadOperation& op, uint64_t epoch,
   op.exec("zlog", "read", in);
 }
 
+void cls_zlog_trim(librados::ObjectWriteOperation& op, uint64_t epoch,
+    uint64_t position)
+{
+  bufferlist in;
+  cls_zlog_trim_op call;
+  call.epoch = epoch;
+  call.position = position;
+  ::encode(call, in);
+  op.exec("zlog", "trim", in);
+}
+
 class ClsZlogMaxPositionReply : public librados::ObjectOperationCompletion {
  public:
   ClsZlogMaxPositionReply(uint64_t *pposition, int *pret) :
