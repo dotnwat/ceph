@@ -7310,6 +7310,45 @@ done:
     wait_for_finished_proposal(op, new Monitor::C_Command(mon, op, 0, ss.str(),
 					      get_last_committed() + 1));
     return true;
+  } else if (prefix == "osd pool set-class") {
+
+    string poolstr;
+    cmd_getval(g_ceph_context, cmdmap, "pool", poolstr);
+    int64_t pool_id = osdmap.lookup_pg_pool_name(poolstr);
+    if (pool_id < 0) {
+      ss << "unrecognized pool '" << poolstr << "'";
+      err = -ENOENT;
+      goto reply;
+    }
+
+    string clsname;
+    cmd_getval(g_ceph_context, cmdmap, "class", clsname);
+    if (clsname == "") {
+      ss << "invalid class name '" << clsname << "'";
+      err = -EINVAL;
+      goto reply;
+    }
+
+    string script;
+    cmd_getval(g_ceph_context, cmdmap, "script", script);
+    if (script == "") {
+      ss << "invalid script <<< clipped >>>";
+      err = -EINVAL;
+      goto reply;
+    }
+
+    pg_pool_t *p = pending_inc.get_new_pool(pool_id,
+        osdmap.get_pg_pool(pool_id));
+
+    p->lua_script = script;
+
+    ss << "set-class " << clsname << " (ignored) = <<< clipped >>> for pool " << poolstr;
+
+    rs = ss.str();
+    wait_for_finished_proposal(op, new Monitor::C_Command(mon, op, 0, rs,
+					      get_last_committed() + 1));
+    return true;
+
   } else if (prefix == "osd pool set-quota") {
     string poolstr;
     cmd_getval(g_ceph_context, cmdmap, "pool", poolstr);

@@ -1223,6 +1223,8 @@ public:
 
   pool_opts_t opts; ///< options
 
+  string lua_script;
+
 private:
   vector<uint32_t> grade_table;
 

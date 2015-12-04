@@ -8740,6 +8740,23 @@ int OSD::init_op_flags(OpRequestRef& op)
 	bp.copy(iter->op.cls.class_len, cname);
 	bp.copy(iter->op.cls.method_len, mname);
 
+        /*
+         * Notes on handling Lua classes distributed via pg_pool_t:
+         *
+         *   Currently it is required that all scripts use the class name
+         *   "lua" which means that `open_class` below always works and we
+         *   virtualize on the method name. The ability to use Lua scripts
+         *   loaded from the file system introduced the notion of Lua backed
+         *   classes removing the requirement that "lua" class always be used.
+         *
+         *   The definition of Lua classes is held in pg_pool_t::lua_classes,
+         *   but it isn't clear how to safely reach into that structure at
+         *   this point in the code path.
+         *
+         *   TODO: find out what sort of synchronization issues arise when
+         *   reaching into pg_pool_t at this point. If safe then extract the
+         *   class name and script and patch into the ClassHandler.
+         */
 	ClassHandler::ClassData *cls;
 	int r = class_handler->open_class(cname, &cls);
 	if (r) {
@@ -8751,13 +8768,35 @@ int OSD::init_op_flags(OpRequestRef& op)
 	  return r;
 	}
 	int flags = cls->get_method_flags(mname.c_str());
-	if (flags < 0) {
-	  if (flags == -ENOENT)
-	    r = -EOPNOTSUPP;
-	  else
-	    r = flags;
-	  return r;
-	}
+        if (flags < 0) {
+          /*
+           * If the method isn't found and the Lua class is being invoked
+           * we'll attempt to perform late binding during execution of the Lua
+           * script. This means that the static methods in `cls_lua` become
+           * reserved:
+           *
+           *   - eval_msgpack
+           *   - eval_json
+           *   - eval_bufferlist
+           *
+           * TODO: there is currently not a method for extracting operation
+           * flags from dynamically defined interfaces so we patch the flags
+           * to be conservative and cover all our bases.
+           *
+           * TODO: since those methods are only referenced by a wrapper
+           * library they could be slightly obfuscated to make a name
+           * collision more unlikely.
+           */
+          if (flags == -ENOENT && cname == "lua")
+            flags = CLS_METHOD_RD | CLS_METHOD_WR;
+          else {
+            if (flags == -ENOENT)
+              r = -EOPNOTSUPP;
+            else
+              r = flags;
+            return r;
+          }
+        }
 	is_read = flags & CLS_METHOD_RD;
 	is_write = flags & CLS_METHOD_WR;
         bool is_promote = flags & CLS_METHOD_PROMOTE;

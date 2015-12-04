@@ -4231,11 +4231,29 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 	assert(result == 0);   // init_op_flags() already verified this works.
 
 	ClassHandler::ClassMethod *method = cls->get_method(mname.c_str());
-	if (!method) {
-	  dout(10) << "call method " << cname << "." << mname << " does not exist" << dendl;
-	  result = -EOPNOTSUPP;
-	  break;
-	}
+        if (!method) {
+          /*
+           * If the named method doesn't exist and the target object class is
+           * `cls_lua` then we patch this call with the Lua script stored in
+           * `pg_pool_t` and allow late binding of the referenced method with
+           * the script.
+           */
+          if (cname == "lua") {
+            method = cls->get_method("eval_bufferlist");
+            if (method) {
+              bufferlist tmp_indata;
+              ::encode(pool.info.lua_script, tmp_indata);
+              ::encode(mname, tmp_indata);
+              ::encode(indata, tmp_indata);
+              indata = tmp_indata;
+            }
+          }
+          if (!method) {
+            dout(10) << "call method " << cname << "." << mname << " does not exist" << dendl;
+            result = -EOPNOTSUPP;
+            break;
+          }
+        }
 
 	int flags = method->get_flags();
 	if (flags & CLS_METHOD_WR)
