@@ -69,6 +69,8 @@ DENCODER_DEPS += libcls_journal_client.la
 
 libcls_zlog_client_la_SOURCES = \
 	cls/zlog/cls_zlog_client.cc
+libcls_zlog_client_la_LIBADD = $(LIBCOMMON) $(EXTRALIBS)
+libcls_zlog_client_la_LDFLAGS = ${AM_LDFLAGS} -version-info 1:0:0 -export-symbols-regex '^cls_zlog_.*'
 lib_LTLIBRARIES += libcls_zlog_client.la
 
 noinst_HEADERS += \
