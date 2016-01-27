@@ -88,9 +88,13 @@ cls_method_handle_t h_set_projection;
 cls_method_handle_t h_get_projection;
 
 #define ZLOG_EPOCH_KEY "____zlog.epoch"
-#define ZLOG_PROJECTION_KEY  "____zlog.projection"
 #define ZLOG_POS_PREFIX "____zlog.pos."
 #define ZLOG_MAX_POS_KEY "____zlog.max_position"
+
+// per-epoch key prefix
+#define ZLOG_PROJECTION_PREFIX  "____zlog.projection."
+// maximum epoch tracked
+#define ZLOG_LATEST_PROJECTION_KEY "____zlog.latest_projection"
 
 struct cls_zlog_log_entry {
   int flags;
@@ -535,19 +539,38 @@ static int max_position(cls_method_context_t hctx, bufferlist *in,
   return CLS_ZLOG_OK;
 }
 
-static int __get_projection(cls_method_context_t hctx, uint64_t *pepoch)
+static int __set_latest_projection(cls_method_context_t hctx,
+    uint64_t epoch)
 {
   bufferlist bl;
-  int ret = cls_cxx_map_get_val(hctx, ZLOG_PROJECTION_KEY, &bl);
-  if (ret < 0)
+  ::encode(epoch, bl);
+
+  int ret = cls_cxx_map_set_val(hctx, ZLOG_LATEST_PROJECTION_KEY, &bl);
+  if (ret < 0) {
+    CLS_LOG(0, "ERROR: could not set latest projection %llu",
+        (unsigned long long)epoch);
     return ret;
+  }
+
+  return 0;
+}
+
+static int __get_latest_projection(cls_method_context_t hctx,
+    uint64_t *pepoch)
+{
+  bufferlist bl;
+  int ret = cls_cxx_map_get_val(hctx, ZLOG_LATEST_PROJECTION_KEY, &bl);
+  if (ret < 0) {
+    CLS_LOG(0, "__get_latest_projection: failed to get map val");
+    return ret;
+  }
 
   uint64_t epoch;
   try {
     bufferlist::iterator it = bl.begin();
     ::decode(epoch, it);
   } catch (buffer::error& err) {
-    CLS_LOG(0, "ERROR: set_projection(): failed to decode projection");
+    CLS_LOG(0, "ERROR: __get_latest_projection: cannot decode");
     return -EIO;
   }
 
@@ -556,14 +579,49 @@ static int __get_projection(cls_method_context_t hctx, uint64_t *pepoch)
   return 0;
 }
 
-static int __set_projection(cls_method_context_t hctx, uint64_t epoch)
+static int __get_projection(cls_method_context_t hctx, bufferlist *out,
+    uint64_t epoch)
 {
-  bufferlist bl;
-  ::encode(epoch, bl);
+  // build projection key: prefix.epoch
+  stringstream key;
+  key << ZLOG_PROJECTION_PREFIX << epoch;
 
-  int ret = cls_cxx_map_set_val(hctx, ZLOG_PROJECTION_KEY, &bl);
+  // read key from omap
+  bufferlist bl;
+  int ret = cls_cxx_map_get_val(hctx, key.str(), &bl);
+  if (ret < 0)
+    return ret;
+
+  if (out)
+    *out = bl;
+
+  return 0;
+}
+
+static int __set_projection(cls_method_context_t hctx, uint64_t epoch, bufferlist *bl)
+{
+  // projections are write-once. we return if a projection already exists at
+  // this epoch, or there is an error other than -ENOENT.
+  int ret = __get_projection(hctx, NULL, epoch);
+  if (ret == 0) {
+    CLS_LOG(0, "ERROR: __set_projection: projection already set %llu",
+        (unsigned long long)epoch);
+    return -EINVAL;
+  } else if (ret != -ENOENT) {
+    CLS_LOG(0, "ERROR: __set_projection: could not get projection %llu",
+        (unsigned long long)epoch);
+    return ret;
+  }
+  assert(ret == -ENOENT);
+
+  // build projection key: prefix.epoch
+  stringstream key;
+  key << ZLOG_PROJECTION_PREFIX << epoch;
+
+  // set the projection
+  ret = cls_cxx_map_set_val(hctx, key.str(), bl);
   if (ret < 0) {
-    CLS_LOG(0, "ERROR: __set_projction(): could not set projection epoch");
+    CLS_LOG(0, "ERROR: __set_projction(): could not set projection");
     return ret;
   }
 
@@ -572,21 +630,47 @@ static int __set_projection(cls_method_context_t hctx, uint64_t epoch)
 
 static int set_projection(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
+  cls_zlog_set_projection_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: set_projection: failed to decode input");
+    return -EINVAL;
+  }
+
+  // get the latest projection, if one exists
   uint64_t epoch;
-  int ret = __get_projection(hctx, &epoch);
-  if (ret < 0 && ret != -ENOENT) {
-    CLS_LOG(0, "ERROR: failed to read projection");
+  int ret = __get_latest_projection(hctx, &epoch);
+  if (ret && ret != -ENOENT) {
+    CLS_LOG(0, "ERROR: set_projection: error finding latest epoch %d", ret);
     return ret;
   }
 
-  if (ret == -ENOENT)
-    epoch = 0;
-  else
-    epoch++;
+  // if not projection exists, then the first should be zero
+  if (ret == -ENOENT && op.epoch != 0) {
+    CLS_LOG(0, "ERROR: set_projection: first epoch must be zero %llu given",
+        (unsigned long long)epoch);
+    return -EINVAL;
+  }
 
-  ret = __set_projection(hctx, epoch);
+  // if a projection does exist, then we should be setting curr_proj + 1
+  if (ret != -ENOENT && op.epoch != (epoch + 1)) {
+    CLS_LOG(0, "ERROR: set_projection: new epoch must be curr+1 curr " \
+        "%llu given %llu", (unsigned long long)op.epoch,
+        (unsigned long long)epoch);
+    return -EINVAL;
+  }
+
+  ret = __set_projection(hctx, op.epoch, &op.data);
   if (ret < 0) {
     CLS_LOG(0, "ERROR: set_projection(): failed to set projection");
+    return ret;
+  }
+
+  ret = __set_latest_projection(hctx, op.epoch);
+  if (ret < 0) {
+    CLS_LOG(0, "ERROR: set_projection(): failed to set latest projection");
     return ret;
   }
 
@@ -595,14 +679,38 @@ static int set_projection(cls_method_context_t hctx, bufferlist *in, bufferlist 
 
 static int get_projection(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
-  uint64_t epoch;
-  int ret = __get_projection(hctx, &epoch);
+  cls_zlog_get_projection_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: get_projection: failed to decode input");
+    return -EINVAL;
+  }
+
+  // use specified epoch, unless latest is requested
+  uint64_t epoch = op.epoch;
+  if (op.latest) {
+    int ret = __get_latest_projection(hctx, &epoch);
+    if (ret) {
+      CLS_LOG(0, "ERROR: get_projection: error finding latest epoch %d", ret);
+      return ret;
+    }
+  }
+
+  // read the projection blob at the given epoch
+  bufferlist bl;
+  int ret = __get_projection(hctx, &bl, epoch);
   if (ret < 0) {
+    CLS_LOG(0, "ERROR: get_projection: could not find epoch %llu ret %d",
+        (unsigned long long)epoch, ret);
     return ret;
   }
 
   cls_zlog_get_projection_ret reply;
   reply.epoch = epoch;
+  reply.out = bl;
+
   ::encode(reply, *out);
 
   return 0;

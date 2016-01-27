@@ -96,29 +96,71 @@ void cls_zlog_max_position(librados::ObjectReadOperation& op, uint64_t epoch,
   op.exec("zlog", "max_position", in, new ClsZlogMaxPositionReply(pposition, pret));
 }
 
-void cls_zlog_set_projection(librados::ObjectWriteOperation& op)
+void cls_zlog_set_projection(librados::ObjectWriteOperation& op,
+    uint64_t epoch, ceph::bufferlist& data)
 {
-  bufferlist in;
-  op.exec("zlog", "set_projection", in);
+  cls_zlog_set_projection_op call;
+  call.epoch = epoch;
+  call.data = data;
+
+  bufferlist inbl;
+  ::encode(call, inbl);
+
+  op.exec("zlog", "set_projection", inbl);
 }
 
-int cls_zlog_get_projection(librados::IoCtx& ioctx, const std::string& oid, uint64_t *pepoch)
-{
-  bufferlist inbl, outbl;
-  int ret = ioctx.exec(oid, "zlog", "get_projection", inbl, outbl);
-  if (ret)
-    return ret;
+class GetProjectionReply : public librados::ObjectOperationCompletion {
+ public:
+  GetProjectionReply(int *pret, uint64_t *pepoch, bufferlist *out) :
+    pret_(pret), pepoch_(pepoch), out_(out)
+  {}
 
-  uint64_t epoch;
-  try {
-    bufferlist::iterator it = outbl.begin();
-    ::decode(epoch, it);
-    *pepoch = epoch;
-  } catch (buffer::error& err) {
-    return -EIO;
+  void handle_completion(int ret, bufferlist& outbl) {
+    if (ret == 0) {
+      cls_zlog_get_projection_ret reply;
+      try {
+        bufferlist::iterator it = outbl.begin();
+        ::decode(reply, it);
+        if (pepoch_)
+          *pepoch_ = reply.epoch;
+        *out_ = reply.out;
+      } catch (buffer::error& err) {
+        ret = -EIO;
+      }
+    }
+    *pret_ = ret;
   }
 
-  return 0;
+ private:
+  int *pret_;
+  uint64_t *pepoch_;
+  bufferlist *out_;
+};
+
+static void __get_projection(librados::ObjectReadOperation& op,
+    uint64_t epoch, bool latest, int *pret, uint64_t *pepoch, bufferlist *out)
+{
+  cls_zlog_get_projection_op call;
+  call.epoch = epoch;
+  call.latest = latest;
+
+  bufferlist inbl;
+  ::encode(call, inbl);
+
+  op.exec("zlog", "get_projection", inbl,
+      new GetProjectionReply(pret, pepoch, out));
+}
+
+void cls_zlog_get_latest_projection(librados::ObjectReadOperation& op,
+    int *pret, uint64_t *pepoch, bufferlist *out)
+{
+  __get_projection(op, 0, true, pret, pepoch, out);
+}
+
+void cls_zlog_get_projection(librados::ObjectReadOperation& op, int *pret,
+    uint64_t epoch, bufferlist *out)
+{
+  __get_projection(op, epoch, false, pret, NULL, out);
 }
 
 }
