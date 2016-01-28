@@ -171,7 +171,7 @@ static int check_epoch(cls_method_context_t hctx, uint64_t epoch)
     return -EIO;
   }
 
-  if (epoch < cur_epoch) {
+  if (epoch <= cur_epoch) {
     CLS_LOG(0, "NOTICE: check_update(): old epoch proposed");
     return CLS_ZLOG_STALE_EPOCH;
   }
