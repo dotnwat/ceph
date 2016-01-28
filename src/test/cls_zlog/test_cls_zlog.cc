@@ -77,14 +77,14 @@ TEST(ClsZlog, AioFill) {
   IoCtx ioctx;
   cluster.ioctx_create(pool_name.c_str(), ioctx);
 
-  // rejects fill if no epoch has been set
+  // fill is ok if no epoch has been set
   librados::AioCompletion *c = librados::Rados::aio_create_completion();
   librados::ObjectWriteOperation *op = new_op();
   zlog::cls_zlog_fill(*op, 100, 10);
   int ret = ioctx.aio_operate("obj", c, op);
   ASSERT_EQ(ret, 0);
   c->wait_for_complete();
-  ASSERT_EQ(c->get_return_value(), -ENOENT);
+  ASSERT_EQ(c->get_return_value(), zlog::CLS_ZLOG_OK);
   delete c;
 
   // set epoch
@@ -251,11 +251,11 @@ TEST(ClsZlog, Fill) {
   int ret = ioctx.exec("obj", "zlog", "fill", inbl, outbl);
   ASSERT_EQ(ret, -EINVAL);
 
-  // rejects fill if no epoch has been set
+  // fill is ok if no epoch has been set
   librados::ObjectWriteOperation *op = new_op();
   zlog::cls_zlog_fill(*op, 100, 10);
   ret = ioctx.operate("obj", op);
-  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
   // set epoch
   op = new_op();
@@ -400,6 +400,161 @@ TEST(ClsZlog, Fill) {
   ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
 }
 
+TEST(ClsZlog, FillInit) {
+  Rados cluster;
+  std::string pool_name = get_temp_pool_name();
+  ASSERT_EQ("", create_one_pool_pp(pool_name, cluster));
+  IoCtx ioctx;
+  cluster.ioctx_create(pool_name.c_str(), ioctx);
+
+  // fails to decode input (bad message)
+  bufferlist inbl, outbl;
+  int ret = ioctx.exec("obj", "zlog", "fill", inbl, outbl);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // fill is ok if no epoch has been set
+  librados::ObjectWriteOperation *op = new_op();
+  zlog::cls_zlog_fill(*op, 100, 10);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // try again
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 100, 10);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // try with smaller epoch
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 0, 10);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // try with larger epoch
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 1000, 10);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  srand(0);
+
+  // fill then fill is OK
+  std::set<uint64_t> filled;
+  for (int i = 0; i < 100; i++) {
+    uint64_t pos = rand();
+
+    filled.insert(pos);
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_fill(op, 100, pos);
+    ret = ioctx.operate("obj", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  }
+
+  std::set<uint64_t>::iterator it = filled.begin();
+  for (; it != filled.end(); it++) {
+    uint64_t pos = *it;
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_fill(op, 100, pos);
+    ret = ioctx.operate("obj", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  }
+
+  bufferlist bl;
+  bl.append("some data");
+
+  // filling a written position yields read-only status
+  std::set<uint64_t> written;
+  for (int i = 0; i < 100; i++) {
+    uint64_t pos = rand();
+
+    if (written.count(pos))
+      continue;
+
+    written.insert(pos);
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_write(op, 100, pos, bl);
+    ret = ioctx.operate("obj", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  }
+
+  it = written.begin();
+  for (; it != written.end(); it++) {
+    uint64_t pos = *it;
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_fill(op, 100, pos);
+    ret = ioctx.operate("obj", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+  }
+
+  // fill doesn't affect max position
+  uint64_t pos;
+  int status;
+  bufferlist bl3;
+  librados::ObjectReadOperation op2;
+  zlog::cls_zlog_max_position(op2, 100, &pos, &status);
+  ret = ioctx.operate("obj", &op2, &bl3);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  ASSERT_GT(pos, (unsigned)0);
+
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 100, pos + 10);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  uint64_t pos2;
+  bufferlist bl2;
+  librados::ObjectReadOperation op3;
+  zlog::cls_zlog_max_position(op3, 100, &pos2, &status);
+  ret = ioctx.operate("obj", &op3, &bl2);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(pos, pos2);
+
+  // fails if there is junk entry
+  std::map<std::string, bufferlist> vals;
+  bl.clear();
+  bl.append("j");
+  vals["____zlog.pos.00000000000000000099"] = bl;
+  ioctx.omap_set("obj", vals);
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 100, 99);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, -EIO);
+
+  // fill to a trimmed position returns OK
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 999);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 100, 999);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // fill to a trimmed position that was previously written returns OK
+  op = new_op();
+  zlog::cls_zlog_write(*op, 100, 1000, bl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 100, 1000);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 1000);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 100, 1000);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
+}
+
 TEST(ClsZlog, Write) {
   Rados cluster;
   std::string pool_name = get_temp_pool_name();
@@ -412,13 +567,13 @@ TEST(ClsZlog, Write) {
   int ret = ioctx.exec("obj", "zlog", "write", inbl, outbl);
   ASSERT_EQ(ret, -EINVAL);
 
-  // rejects if no epoch has been set
+  // ok if no epoch has been set
   bufferlist bl2;
   bl2.append("baasdf");
   librados::ObjectWriteOperation *op = new_op();
   zlog::cls_zlog_write(*op, 100, 10, bl2);
   ret = ioctx.operate("obj", op);
-  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
   // set epoch
   op = new_op();
@@ -430,7 +585,7 @@ TEST(ClsZlog, Write) {
   op = new_op();
   zlog::cls_zlog_write(*op, 100, 10, bl2);
   ret = ioctx.operate("obj", op);
-  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
 
   // try with smaller epoch
   op = new_op();
@@ -600,13 +755,13 @@ TEST(ClsZlog, AioWrite) {
 
   librados::AioCompletion *c = librados::Rados::aio_create_completion();
 
-  // rejects if no epoch has been set
+  // ok if no epoch has been set
   librados::ObjectWriteOperation *op = new_op();
   zlog::cls_zlog_write(*op, 100, 10, bl);
   int ret = ioctx.aio_operate("obj", c, op);
   ASSERT_EQ(ret, 0);
   c->wait_for_complete();
-  ASSERT_EQ(c->get_return_value(), -ENOENT);
+  ASSERT_EQ(c->get_return_value(), zlog::CLS_ZLOG_OK);
   delete c;
 
   // set epoch
@@ -622,7 +777,7 @@ TEST(ClsZlog, AioWrite) {
   ret = ioctx.aio_operate("obj", c, op);
   ASSERT_EQ(ret, 0);
   c->wait_for_complete();
-  ASSERT_EQ(c->get_return_value(), zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(c->get_return_value(), zlog::CLS_ZLOG_READ_ONLY);
   delete c;
 
   // try with smaller epoch
@@ -657,6 +812,181 @@ TEST(ClsZlog, AioWrite) {
   ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
 }
 
+TEST(ClsZlog, WriteInit) {
+  Rados cluster;
+  std::string pool_name = get_temp_pool_name();
+  ASSERT_EQ("", create_one_pool_pp(pool_name, cluster));
+  IoCtx ioctx;
+  cluster.ioctx_create(pool_name.c_str(), ioctx);
+
+  // fails to decode input (bad message)
+  bufferlist inbl, outbl;
+  int ret = ioctx.exec("obj", "zlog", "write", inbl, outbl);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // ok if no epoch has been set
+  bufferlist bl2;
+  bl2.append("baasdf");
+  librados::ObjectWriteOperation *op = new_op();
+  zlog::cls_zlog_write(*op, 100, 10, bl2);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // try again
+  op = new_op();
+  zlog::cls_zlog_write(*op, 100, 10, bl2);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+
+  // try with smaller epoch
+  op = new_op();
+  zlog::cls_zlog_write(*op, 0, 20, bl2);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // try with larger epoch
+  op = new_op();
+  zlog::cls_zlog_write(*op, 1000, 20, bl2);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+
+  op = new_op();
+  zlog::cls_zlog_write(*op, 1000, 19, bl2);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_write(*op, 1000, 10, bl2);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+
+  // new max position should be correct too
+  bufferlist bl5;
+  uint64_t maxpos5;
+  int status5;
+  librados::ObjectReadOperation op5;
+  zlog::cls_zlog_max_position(op5, 100, &maxpos5, &status5);
+  ret = ioctx.operate("obj", &op5, &bl5);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(maxpos5, (unsigned)20);
+
+  bufferlist bl;
+  bl.append("some data");
+  srand(0);
+
+  // write then write -> read only status
+  uint64_t max = 0;
+  std::set<uint64_t> written;
+  for (int i = 0; i < 100; i++) {
+    uint64_t pos = rand();
+
+    // include pos = 0 first, as it tests the initialization case of the max
+    // position in cls_zlog
+    if (i == 0)
+      pos = 0;
+
+    if (written.count(pos))
+      continue;
+
+    if (pos > max)
+      max = pos;
+
+    written.insert(pos);
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_write(op, 100, pos, bl);
+    ret = ioctx.operate("obj3", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+    // new max position should be correct too
+    bufferlist bl3;
+    uint64_t maxpos;
+    int status;
+    librados::ObjectReadOperation op2;
+    zlog::cls_zlog_max_position(op2, 100, &maxpos, &status);
+    ret = ioctx.operate("obj3", &op2, &bl3);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+    
+    ASSERT_EQ(maxpos, max);
+  }
+
+  std::set<uint64_t>::iterator it = written.begin();
+  for (; it != written.end(); it++) {
+    uint64_t pos = *it;
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_write(op, 100, pos, bl);
+    ret = ioctx.operate("obj3", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+  }
+
+  // a bunch of writes that failed didn't affect max pos
+  bufferlist bl4;
+  uint64_t pos;
+  int status;
+  librados::ObjectReadOperation op4;
+  zlog::cls_zlog_max_position(op4, 100, &pos, &status);
+  ret = ioctx.operate("obj3", &op4, &bl4);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(pos, max);
+
+  // fill then write -> read only status
+  std::set<uint64_t> filled;
+  for (int i = 0; i < 100; i++) {
+    uint64_t pos = rand();
+
+    filled.insert(pos);
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_fill(op, 100, pos);
+    ret = ioctx.operate("obj2", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  }
+
+  it = filled.begin();
+  for (; it != filled.end(); it++) {
+    uint64_t pos = *it;
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_write(op, 100, pos, bl);
+    ret = ioctx.operate("obj2", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+  }
+
+  // a bunch of writes that failed didn't set max pos
+  bufferlist bl3;
+  librados::ObjectReadOperation op2;
+  zlog::cls_zlog_max_position(op2, 100, &pos, &status);
+  ret = ioctx.operate("obj2", &op2, &bl3);
+  ASSERT_EQ(ret, -ENOENT);
+
+  // writing to a trimmed position returns read-only error
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 999);
+  ret = ioctx.operate("obj2", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_write(*op, 100, 999, bl);
+  ret = ioctx.operate("obj2", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+
+  // writing to a trimmed position that was previously written returns
+  // read-only error
+  op = new_op();
+  zlog::cls_zlog_write(*op, 100, 1000, bl);
+  ret = ioctx.operate("obj2", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 1000);
+  ret = ioctx.operate("obj2", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_write(*op, 100, 1000, bl);
+  ret = ioctx.operate("obj2", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
+}
+
 TEST(ClsZlog, AioRead) {
   Rados cluster;
   std::string pool_name = get_temp_pool_name();
@@ -664,7 +994,7 @@ TEST(ClsZlog, AioRead) {
   IoCtx ioctx;
   cluster.ioctx_create(pool_name.c_str(), ioctx);
 
-  // rejects if no epoch has been set
+  // ok if no epoch has been set
   librados::AioCompletion *c = librados::Rados::aio_create_completion();
   bufferlist bl;
   librados::ObjectReadOperation *op = new_rop();
@@ -672,7 +1002,7 @@ TEST(ClsZlog, AioRead) {
   int ret = ioctx.aio_operate("obj", c, op, &bl);
   ASSERT_EQ(ret, 0);
   c->wait_for_complete();
-  ASSERT_EQ(c->get_return_value(), -ENOENT);
+  ASSERT_EQ(c->get_return_value(), zlog::CLS_ZLOG_NOT_WRITTEN);
   delete c;
 
   // set epoch
@@ -747,7 +1077,6 @@ TEST(ClsZlog, AioRead) {
     delete c;
   }
 
-  ioctx.create("obj2", true);
   wrop = new_op();
   zlog::cls_zlog_seal(*wrop, 99);
   ret = ioctx.operate("obj2", wrop);
@@ -788,24 +1117,17 @@ TEST(ClsZlog, Read) {
   IoCtx ioctx;
   cluster.ioctx_create(pool_name.c_str(), ioctx);
 
-  // for these read only ops they'll return -enoent if the object doesn't
-  // exist. in practice we could loosen this restriction if there are races
-  // that pop up when bootstrapping a log, but really a client shouldn't be
-  // trying to read a log until its gotten a tail from the sequencer, and the
-  // sequencer won't hand anything out until its initialized the log objects.
-  ioctx.create("obj", true);
-
   // fails to decode input (bad message)
   bufferlist inbl, outbl;
   int ret = ioctx.exec("obj", "zlog", "read", inbl, outbl);
   ASSERT_EQ(ret, -EINVAL);
 
-  // rejects if no epoch has been set
+  // ok if no epoch has been set
   bufferlist bl;
   librados::ObjectReadOperation *op = new_rop();
   zlog::cls_zlog_read(*op, 100, 10);
   ret = ioctx.operate("obj", op, &bl);
-  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_NOT_WRITTEN);
 
   // set epoch
   librados::ObjectWriteOperation *wrop = new_op();
@@ -863,7 +1185,6 @@ TEST(ClsZlog, Read) {
     ASSERT_TRUE(memcmp(bl.c_str(), &pos, sizeof(pos)) == 0);
   }
 
-  ioctx.create("obj2", true);
   wrop = new_op();
   zlog::cls_zlog_seal(*wrop, 99);
   ret = ioctx.operate("obj2", wrop);
@@ -892,6 +1213,126 @@ TEST(ClsZlog, Read) {
 
   // read from trimmed location return invalidated
   wrop = new_op();
+  zlog::cls_zlog_trim(*wrop, 100, 999);
+  ret = ioctx.operate("obj2", wrop);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_rop();
+  zlog::cls_zlog_read(*op, 100, 999);
+  ret = ioctx.operate("obj2", op, &bl);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_INVALIDATED);
+
+  // read from trimmed location already written return invalidated
+  wrop = new_op();
+  zlog::cls_zlog_write(*wrop, 100, 1000, bl);
+  ret = ioctx.operate("obj2", wrop);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  wrop = new_op();
+  zlog::cls_zlog_trim(*wrop, 100, 1000);
+  ret = ioctx.operate("obj2", wrop);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_rop();
+  zlog::cls_zlog_read(*op, 100, 1000);
+  ret = ioctx.operate("obj2", op, &bl);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_INVALIDATED);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
+}
+
+TEST(ClsZlog, ReadInit) {
+  Rados cluster;
+  std::string pool_name = get_temp_pool_name();
+  ASSERT_EQ("", create_one_pool_pp(pool_name, cluster));
+  IoCtx ioctx;
+  cluster.ioctx_create(pool_name.c_str(), ioctx);
+
+  // fails to decode input (bad message)
+  bufferlist inbl, outbl;
+  int ret = ioctx.exec("obj", "zlog", "read", inbl, outbl);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // ok if no epoch has been set
+  bufferlist bl;
+  librados::ObjectReadOperation *op = new_rop();
+  zlog::cls_zlog_read(*op, 100, 10);
+  ret = ioctx.operate("obj", op, &bl);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_NOT_WRITTEN);
+
+  // try again
+  op = new_rop();
+  zlog::cls_zlog_read(*op, 100, 10);
+  ret = ioctx.operate("obj", op, &bl);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_NOT_WRITTEN);
+
+  // try with smaller epoch
+  op = new_rop();
+  zlog::cls_zlog_read(*op, 0, 20);
+  ret = ioctx.operate("obj", op, &bl);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_NOT_WRITTEN);
+
+  srand(0);
+
+  // cannot read from unwritten locations
+  for (int i = 0; i < 100; i++) {
+    uint64_t pos = rand();
+    bufferlist bl;
+    librados::ObjectReadOperation op;
+    zlog::cls_zlog_read(op, 100, pos);
+    ret = ioctx.operate("obj", &op, &bl);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_NOT_WRITTEN);
+  }
+
+  // can read stuff that was written
+  std::set<uint64_t> written;
+  for (int i = 0; i < 100; i++) {
+    uint64_t pos = rand();
+    if (written.count(pos))
+      continue;
+    written.insert(pos);
+    bufferlist bl;
+    bl.append((char*)&pos, sizeof(pos));
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_write(op, 100, pos, bl);
+    ret = ioctx.operate("obj", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  }
+
+  std::set<uint64_t>::iterator it = written.begin();
+  for (; it != written.end(); it++) {
+    uint64_t pos = *it;
+    bufferlist bl;
+    librados::ObjectReadOperation op;
+    zlog::cls_zlog_read(op, 100, pos);
+    ret = ioctx.operate("obj", &op, &bl);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+    ASSERT_TRUE(memcmp(bl.c_str(), &pos, sizeof(pos)) == 0);
+  }
+
+  // stuff that was filled is invalid when read
+  std::set<uint64_t> filled;
+  for (int i = 0; i < 100; i++) {
+    uint64_t pos = rand();
+    filled.insert(pos);
+    librados::ObjectWriteOperation op;
+    zlog::cls_zlog_fill(op, 100, pos);
+    ret = ioctx.operate("obj2", &op);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  }
+
+  it = filled.begin();
+  for (; it != filled.end(); it++) {
+    uint64_t pos = *it;
+    bufferlist bl;
+    librados::ObjectReadOperation op;
+    zlog::cls_zlog_read(op, 100, pos);
+    ret = ioctx.operate("obj2", &op, &bl);
+    ASSERT_EQ(ret, zlog::CLS_ZLOG_INVALIDATED);
+  }
+
+  // read from trimmed location return invalidated
+  librados::ObjectWriteOperation *wrop = new_op();
   zlog::cls_zlog_trim(*wrop, 100, 999);
   ret = ioctx.operate("obj2", wrop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
@@ -996,11 +1437,11 @@ TEST(ClsZlog, Trim) {
   int ret = ioctx.exec("obj", "zlog", "trim", inbl, outbl);
   ASSERT_EQ(ret, -EINVAL);
 
-  // rejects if no epoch has been set
+  // ok if no epoch has been set
   librados::ObjectWriteOperation *op = new_op();
   zlog::cls_zlog_trim(*op, 100, 10);
   ret = ioctx.operate("obj", op);
-  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
   // set epoch
   op = new_op();
@@ -1019,6 +1460,67 @@ TEST(ClsZlog, Trim) {
   zlog::cls_zlog_trim(*op, 0, 20);
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_STALE_EPOCH);
+
+  // try with larger epoch
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 1000, 20);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // can trim a position already trimmed
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 100);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 100);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // can trim a position already filled
+  op = new_op();
+  zlog::cls_zlog_fill(*op, 100, 101);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 101);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
+}
+
+TEST(ClsZlog, TrimInit) {
+  Rados cluster;
+  std::string pool_name = get_temp_pool_name();
+  ASSERT_EQ("", create_one_pool_pp(pool_name, cluster));
+  IoCtx ioctx;
+  cluster.ioctx_create(pool_name.c_str(), ioctx);
+
+  // fails to decode input (bad message)
+  bufferlist inbl, outbl;
+  int ret = ioctx.exec("obj", "zlog", "trim", inbl, outbl);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // ok if no epoch has been set
+  librados::ObjectWriteOperation *op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 10);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // try again. can trim unwritten position
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 100, 10);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // try with smaller epoch
+  op = new_op();
+  zlog::cls_zlog_trim(*op, 0, 20);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
   // try with larger epoch
   op = new_op();
