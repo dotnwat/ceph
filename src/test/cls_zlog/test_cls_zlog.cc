@@ -161,10 +161,13 @@ TEST(ClsZlog, AioFill) {
   bufferlist bl;
   bl.append("some data");
 
+  uint64_t maxpos = 0;
+
   // filling a written position yields read-only status
   std::set<uint64_t> written;
   for (int i = 0; i < 100; i++) {
     uint64_t pos = rand();
+    maxpos = std::max(pos, maxpos);
 
     if (written.count(pos))
       continue;
@@ -198,10 +201,10 @@ TEST(ClsZlog, AioFill) {
   int status;
   bufferlist bl3;
   librados::ObjectReadOperation op2;
-  zlog::cls_zlog_max_position(op2, 100, &pos, &status);
+  zlog::cls_zlog_max_position(op2, 99, &pos, &status);
   ret = ioctx.operate("obj", &op2, &bl3);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_GT(pos, (unsigned)0);
+  ASSERT_EQ(pos-1, maxpos);
 
   op = new_op();
   c = librados::Rados::aio_create_completion();
@@ -215,7 +218,7 @@ TEST(ClsZlog, AioFill) {
   uint64_t pos2;
   bufferlist bl2;
   librados::ObjectReadOperation op3;
-  zlog::cls_zlog_max_position(op3, 100, &pos2, &status);
+  zlog::cls_zlog_max_position(op3, 99, &pos2, &status);
   ret = ioctx.operate("obj", &op3, &bl2);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
   ASSERT_EQ(pos, pos2);
@@ -336,7 +339,7 @@ TEST(ClsZlog, Fill) {
   int status;
   bufferlist bl3;
   librados::ObjectReadOperation op2;
-  zlog::cls_zlog_max_position(op2, 100, &pos, &status);
+  zlog::cls_zlog_max_position(op2, 99, &pos, &status);
   ret = ioctx.operate("obj", &op2, &bl3);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
   ASSERT_GT(pos, (unsigned)0);
@@ -349,7 +352,7 @@ TEST(ClsZlog, Fill) {
   uint64_t pos2;
   bufferlist bl2;
   librados::ObjectReadOperation op3;
-  zlog::cls_zlog_max_position(op3, 100, &pos2, &status);
+  zlog::cls_zlog_max_position(op3, 99, &pos2, &status);
   ret = ioctx.operate("obj", &op3, &bl2);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
   ASSERT_EQ(pos, pos2);
@@ -486,28 +489,27 @@ TEST(ClsZlog, FillInit) {
     ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
   }
 
-  // fill doesn't affect max position
+  // not sealed
   uint64_t pos;
   int status;
   bufferlist bl3;
   librados::ObjectReadOperation op2;
-  zlog::cls_zlog_max_position(op2, 100, &pos, &status);
+  zlog::cls_zlog_max_position(op2, 99, &pos, &status);
   ret = ioctx.operate("obj", &op2, &bl3);
-  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_GT(pos, (unsigned)0);
+  ASSERT_EQ(ret, -ENOENT);
 
   op = new_op();
   zlog::cls_zlog_fill(*op, 100, pos + 10);
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
+  // not sealed
   uint64_t pos2;
   bufferlist bl2;
   librados::ObjectReadOperation op3;
   zlog::cls_zlog_max_position(op3, 100, &pos2, &status);
   ret = ioctx.operate("obj", &op3, &bl2);
-  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(pos, pos2);
+  ASSERT_EQ(ret, -ENOENT);
 
   // fails if there is junk entry
   std::map<std::string, bufferlist> vals;
@@ -609,10 +611,10 @@ TEST(ClsZlog, Write) {
   uint64_t maxpos5;
   int status5;
   librados::ObjectReadOperation op5;
-  zlog::cls_zlog_max_position(op5, 100, &maxpos5, &status5);
+  zlog::cls_zlog_max_position(op5, 99, &maxpos5, &status5);
   ret = ioctx.operate("obj", &op5, &bl5);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(maxpos5, (unsigned)20);
+  ASSERT_EQ(maxpos5, (unsigned)21);
 
   bufferlist bl;
   bl.append("some data");
@@ -652,11 +654,11 @@ TEST(ClsZlog, Write) {
     uint64_t maxpos;
     int status;
     librados::ObjectReadOperation op2;
-    zlog::cls_zlog_max_position(op2, 100, &maxpos, &status);
+    zlog::cls_zlog_max_position(op2, 99, &maxpos, &status);
     ret = ioctx.operate("obj3", &op2, &bl3);
     ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
     
-    ASSERT_EQ(maxpos, max);
+    ASSERT_EQ(maxpos-1, max);
   }
 
   std::set<uint64_t>::iterator it = written.begin();
@@ -673,10 +675,10 @@ TEST(ClsZlog, Write) {
   uint64_t pos;
   int status;
   librados::ObjectReadOperation op4;
-  zlog::cls_zlog_max_position(op4, 100, &pos, &status);
+  zlog::cls_zlog_max_position(op4, 99, &pos, &status);
   ret = ioctx.operate("obj3", &op4, &bl4);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(pos, max);
+  ASSERT_EQ(pos-1, max);
 
   // set epoch to 100 for obj2
   op = new_op();
@@ -708,9 +710,11 @@ TEST(ClsZlog, Write) {
   // a bunch of writes that failed didn't set max pos
   bufferlist bl3;
   librados::ObjectReadOperation op2;
-  zlog::cls_zlog_max_position(op2, 100, &pos, &status);
+  zlog::cls_zlog_max_position(op2, 99, &pos, &status);
   ret = ioctx.operate("obj2", &op2, &bl3);
-  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(status, zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(pos, (unsigned)0);
 
   // writing to a trimmed position returns read-only error
   op = new_op();
@@ -860,15 +864,16 @@ TEST(ClsZlog, WriteInit) {
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
 
-  // new max position should be correct too
+  /*
+   * not sealed
+   */
   bufferlist bl5;
   uint64_t maxpos5;
   int status5;
   librados::ObjectReadOperation op5;
-  zlog::cls_zlog_max_position(op5, 100, &maxpos5, &status5);
+  zlog::cls_zlog_max_position(op5, 99, &maxpos5, &status5);
   ret = ioctx.operate("obj", &op5, &bl5);
-  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(maxpos5, (unsigned)20);
+  ASSERT_EQ(ret, -ENOENT);
 
   bufferlist bl;
   bl.append("some data");
@@ -897,16 +902,14 @@ TEST(ClsZlog, WriteInit) {
     ret = ioctx.operate("obj3", &op);
     ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
-    // new max position should be correct too
+    // not sealed
     bufferlist bl3;
     uint64_t maxpos;
     int status;
     librados::ObjectReadOperation op2;
-    zlog::cls_zlog_max_position(op2, 100, &maxpos, &status);
+    zlog::cls_zlog_max_position(op2, 99, &maxpos, &status);
     ret = ioctx.operate("obj3", &op2, &bl3);
-    ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-    
-    ASSERT_EQ(maxpos, max);
+    ASSERT_EQ(ret, -ENOENT);
   }
 
   std::set<uint64_t>::iterator it = written.begin();
@@ -918,15 +921,14 @@ TEST(ClsZlog, WriteInit) {
     ASSERT_EQ(ret, zlog::CLS_ZLOG_READ_ONLY);
   }
 
-  // a bunch of writes that failed didn't affect max pos
+  // not sealed
   bufferlist bl4;
   uint64_t pos;
   int status;
   librados::ObjectReadOperation op4;
-  zlog::cls_zlog_max_position(op4, 100, &pos, &status);
+  zlog::cls_zlog_max_position(op4, 99, &pos, &status);
   ret = ioctx.operate("obj3", &op4, &bl4);
-  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(pos, max);
+  ASSERT_EQ(ret, -ENOENT);
 
   // fill then write -> read only status
   std::set<uint64_t> filled;
@@ -1368,59 +1370,67 @@ TEST(ClsZlog, MaxPosition) {
   IoCtx ioctx;
   cluster.ioctx_create(pool_name.c_str(), ioctx);
 
-  ioctx.create("obj", true);
 
   // fails to decode input (bad message)
+  ioctx.create("obj_1", true);
   bufferlist inbl, outbl;
-  int ret = ioctx.exec("obj", "zlog", "max_position", inbl, outbl);
+  int ret = ioctx.exec("obj_1", "zlog", "max_position", inbl, outbl);
   ASSERT_EQ(ret, -EINVAL);
 
   // set epoch
-  librados::ObjectWriteOperation *wrop = new_op();
-  zlog::cls_zlog_seal(*wrop, 99);
-  ret = ioctx.operate("obj", wrop);
-  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-
-  // make sure that the object exists for the next test so that max_position
-  // returns an error even when the object exists. we want to be able to know
-  // when a log is empty.
-  ret = ioctx.stat("obj", NULL, NULL);
-  ASSERT_EQ(ret, 0);
-
-  bufferlist bl;
-  uint64_t pos;
-  int status;
-  librados::ObjectReadOperation op;
-  zlog::cls_zlog_max_position(op, 100, &pos, &status);
-  ret = ioctx.operate("obj", &op, &bl);
-  ASSERT_EQ(ret, -ENOENT);
-
   librados::ObjectWriteOperation *wop = new_op();
-  zlog::cls_zlog_write(*wop, 100, 0, bl);
+  zlog::cls_zlog_seal(*wop, 99);
   ret = ioctx.operate("obj", wop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
-  librados::ObjectReadOperation op2;
-  zlog::cls_zlog_max_position(op2, 100, &pos, &status);
-  ret = ioctx.operate("obj", &op2, &bl);
+  // epochs must be equal
+  bufferlist bl;
+  uint64_t pos;
+  int status;
+  librados::ObjectReadOperation *rop = new_rop();
+  zlog::cls_zlog_max_position(*rop, 100, &pos, &status);
+  ret = ioctx.operate("obj", rop, &bl);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // empty object means max pos = 0
+  rop = new_rop();
+  bl.clear();
+  zlog::cls_zlog_max_position(*rop, 99, &pos, &status);
+  ret = ioctx.operate("obj", rop, &bl);
   ASSERT_EQ(status, zlog::CLS_ZLOG_OK);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
   ASSERT_EQ(pos, (unsigned)0);
 
+  // write pos 0
   wop = new_op();
+  bl.clear();
+  zlog::cls_zlog_write(*wop, 100, 0, bl);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+
+  // next pos = 1
+  rop = new_rop();
+  bl.clear();
+  zlog::cls_zlog_max_position(*rop, 99, &pos, &status);
+  ret = ioctx.operate("obj", rop, &bl);
+  ASSERT_EQ(status, zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
+  ASSERT_EQ(pos, (unsigned)1);
+
+  wop = new_op();
+  bl.clear();
   zlog::cls_zlog_write(*wop, 100, 50, bl);
   ret = ioctx.operate("obj", wop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
-  // FIXME: report this problem with bl2 causing pool delete/shutdown to hang.
-  // when its sharing the bl above, it hangs. with bl2 its ok.
-  bufferlist bl2;
-  librados::ObjectReadOperation op3;
-  zlog::cls_zlog_max_position(op3, 100, &pos, &status);
-  ret = ioctx.operate("obj", &op3, &bl2);
+  // next pos = 51 after writing 50
+  rop = new_rop();
+  bl.clear();
+  zlog::cls_zlog_max_position(*rop, 99, &pos, &status);
+  ret = ioctx.operate("obj", rop, &bl);
   ASSERT_EQ(status, zlog::CLS_ZLOG_OK);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(pos, (unsigned)50);
+  ASSERT_EQ(pos, (unsigned)51);
 
   ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
 }
