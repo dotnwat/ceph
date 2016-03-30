@@ -67,6 +67,9 @@ libcls_journal_client_la_SOURCES = \
 noinst_LTLIBRARIES += libcls_journal_client.la
 DENCODER_DEPS += libcls_journal_client.la
 
+libcls_zlog_bench_client_la_SOURCES = cls/zlog_bench/cls_zlog_bench_client.cc
+lib_LTLIBRARIES += libcls_zlog_bench_client.la
+
 noinst_HEADERS += \
 	cls/lock/cls_lock_types.h \
 	cls/lock/cls_lock_ops.h \
@@ -101,4 +104,5 @@ noinst_HEADERS += \
 	cls/cephfs/cls_cephfs.h \
 	cls/cephfs/cls_cephfs_client.h \
 	cls/journal/cls_journal_client.h \
-	cls/journal/cls_journal_types.h
+	cls/journal/cls_journal_types.h \
+    cls/zlog_bench/cls_zlog_bench_client.h

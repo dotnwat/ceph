@@ -10,6 +10,10 @@ libcls_numops_la_SOURCES = cls/numops/cls_numops.cc
 libcls_numops_la_LDFLAGS = ${AM_LDFLAGS} -module -avoid-version -shared -export-symbols-regex '.*__cls_.*'
 radoslib_LTLIBRARIES += libcls_numops.la
 
+libcls_zlog_bench_la_SOURCES = cls/zlog_bench/cls_zlog_bench.cc
+libcls_zlog_bench_la_LDFLAGS = ${AM_LDFLAGS} -module -avoid-version -shared -export-symbols-regex '.*__cls_.*'
+radoslib_LTLIBRARIES += libcls_zlog_bench.la
+
 libcls_rbd_la_SOURCES = \
 	cls/rbd/cls_rbd.cc \
 	cls/rbd/cls_rbd_types.cc
