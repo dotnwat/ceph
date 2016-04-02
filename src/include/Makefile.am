@@ -12,7 +12,8 @@ rados_include_DATA = \
 	$(srcdir)/include/buffer_fwd.h \
 	$(srcdir)/include/page.h \
 	$(srcdir)/include/crc32c.h \
-	$(srcdir)/include/memory.h
+	$(srcdir)/include/memory.h \
+	$(srcdir)/cls/zlog_bench/cls_zlog_bench_client.h
 
 if WITH_RADOSGW
 rados_include_DATA += \
