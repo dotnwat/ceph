@@ -41,10 +41,13 @@ static int append(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   uint64_t size;
   int ret = cls_cxx_stat(hctx, &size, NULL);
-  if (ret) {
+  if (ret < 0 && ret != -ENOENT) {
     CLS_ERR("ERROR: append: stat error: %d", ret);
     return ret;
   }
+
+  if (ret == -ENOENT)
+    size = 0;
 
   ret = cls_cxx_write(hctx, size, op.data.length(), &op.data);
   if (ret) {
