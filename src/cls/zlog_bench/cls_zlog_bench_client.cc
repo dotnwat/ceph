@@ -70,4 +70,28 @@ namespace zlog_bench {
     ::encode(call, in);
     op.exec("zlog_bench", "map_write_full", in);
   }
+
+  void cls_zlog_bench_stream_write_null(librados::ObjectWriteOperation& op,
+      uint64_t epoch, uint64_t position, ceph::bufferlist& data)
+  {
+    bufferlist in;
+    cls_zlog_bench_append_op call;
+    call.epoch = epoch;
+    call.position = position;
+    call.data = data;
+    ::encode(call, in);
+    op.exec("zlog_bench", "stream_write_null", in);
+  }
+
+  void cls_zlog_bench_stream_write_full(librados::ObjectWriteOperation& op,
+      uint64_t epoch, uint64_t position, ceph::bufferlist& data)
+  {
+    bufferlist in;
+    cls_zlog_bench_append_op call;
+    call.epoch = epoch;
+    call.position = position;
+    call.data = data;
+    ::encode(call, in);
+    op.exec("zlog_bench", "stream_write_full", in);
+  }
 }
