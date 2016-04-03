@@ -10,6 +10,7 @@ CLS_NAME(zlog_bench)
 cls_handle_t h_class;
 cls_method_handle_t h_append;
 cls_method_handle_t h_append_init;
+cls_method_handle_t h_append_omap_index;
 cls_method_handle_t h_append_check_epoch;
 
 #define ZLOG_EPOCH_KEY "____zlog.epoch"
@@ -182,6 +183,114 @@ static int append_check_epoch(cls_method_context_t hctx, bufferlist *in, bufferl
   return 0;
 }
 
+struct cls_zlog_log_entry_md {
+  uint64_t offset;
+  size_t length;
+  char flags;
+
+  cls_zlog_log_entry_md() {}
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    ::encode(offset, bl);
+    ::encode(length, bl);
+    ::encode(flags, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(bufferlist::iterator& bl) {
+    DECODE_START(1, bl);
+    ::decode(offset, bl);
+    ::decode(length, bl);
+    ::decode(flags, bl);
+    DECODE_FINISH(bl);
+  }
+};
+WRITE_CLASS_ENCODER(cls_zlog_log_entry_md)
+
+/*
+ * Stream append with epoch guard and omap-based indexing. In this mode we are
+ * appending to the object bytestream, but putting all of the metadata like
+ * entry state and logical-to-physical mapping into omap.
+ */
+static int append_omap_index(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls_zlog_bench_append_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: append_omap_index: failed to decode input");
+    return -EINVAL;
+  }
+
+  int ret = check_epoch(hctx, op.epoch);
+  if (ret) {
+    CLS_ERR("NOTICE: append_omap_index: stale epoch value");
+    return ret;
+  }
+
+  // lookup position in index
+  bufferlist bl;
+  std::string key = u64tostr(op.position);
+  ret = cls_cxx_map_get_val(hctx, key, &bl);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_LOG(0, "ERROR: append_omap_index: failed to read index");
+    return ret;
+  }
+
+  // if position hasn't been written, we'll take it
+  if (ret == -ENOENT) {
+
+    // get the append offset
+    uint64_t size;
+    ret = cls_cxx_stat(hctx, &size, NULL);
+    if (ret) {
+      CLS_ERR("ERROR: append_check_epoch: stat error: %d", ret);
+      return ret;
+    }
+
+    // prepare metadata and add to index
+    cls_zlog_log_entry_md md;
+    md.offset = size;
+    md.length = op.data.length();
+
+    // append the log entry data
+    ret = cls_cxx_write(hctx, size, op.data.length(), &op.data);
+    if (ret) {
+      CLS_ERR("ERROR: append_check_epoch: write error: %d", ret);
+      return ret;
+    }
+
+    bufferlist bl;
+    ::encode(md, bl);
+    ret = cls_cxx_map_set_val(hctx, key, &bl);
+    if (ret < 0) {
+      CLS_LOG(0, "ERROR: write(): failed to write index");
+      return ret;
+    }
+
+    // update max position? nope. in zlog we would update the current max
+    // position. but it should be much more efficient to spend some time
+    // figuring out what hte maximum position is when we need to, which is
+    // relatively infrequent.
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "APPEND OMAP INDEX: %llu %llu %llu %llu\n",
+      op.epoch,
+      op.position,
+      md.offset,
+      md.length);
+#endif
+
+    return 0;
+  }
+
+  // this would be an error related to the write failing because the log entry
+  // position had already been written, filled, or trimmed.
+  return -EROFS;
+}
+
 void __cls_init()
 {
   CLS_LOG(20, "loading cls_zlog_bench");
@@ -195,6 +304,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "append_check_epoch",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append_check_epoch, &h_append_check_epoch);
+
+  cls_register_cxx_method(h_class, "append_omap_index",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          append_omap_index, &h_append_omap_index);
 
   cls_register_cxx_method(h_class, "append_init",
                           CLS_METHOD_RD | CLS_METHOD_WR,
