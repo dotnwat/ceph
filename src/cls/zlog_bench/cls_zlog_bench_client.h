@@ -24,6 +24,12 @@ namespace zlog_bench {
 
   void cls_zlog_bench_map_write_full(librados::ObjectWriteOperation& op,
       uint64_t epoch, uint64_t position, ceph::bufferlist& data);
+
+  void cls_zlog_bench_stream_write_null(librados::ObjectWriteOperation& op,
+      uint64_t epoch, uint64_t position, ceph::bufferlist& data);
+
+  void cls_zlog_bench_stream_write_full(librados::ObjectWriteOperation& op,
+      uint64_t epoch, uint64_t position, ceph::bufferlist& data);
 }
 
 #endif
