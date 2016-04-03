@@ -8,10 +8,14 @@ CLS_VER(1,0)
 CLS_NAME(zlog_bench)
 
 cls_handle_t h_class;
+
 cls_method_handle_t h_append;
 cls_method_handle_t h_append_init;
 cls_method_handle_t h_append_omap_index;
 cls_method_handle_t h_append_check_epoch;
+
+cls_method_handle_t h_map_write_null;
+cls_method_handle_t h_map_write_full;
 
 #define ZLOG_EPOCH_KEY "____zlog.epoch"
 #define ZLOG_POS_PREFIX "____zlog.pos."
@@ -262,9 +266,9 @@ static int append_omap_index(cls_method_context_t hctx, bufferlist *in, bufferli
       return ret;
     }
 
-    bufferlist bl;
-    ::encode(md, bl);
-    ret = cls_cxx_map_set_val(hctx, key, &bl);
+    bufferlist mdbl;
+    ::encode(md, mdbl);
+    ret = cls_cxx_map_set_val(hctx, key, &mdbl);
     if (ret < 0) {
       CLS_LOG(0, "ERROR: write(): failed to write index");
       return ret;
@@ -281,6 +285,122 @@ static int append_omap_index(cls_method_context_t hctx, bufferlist *in, bufferli
       op.position,
       md.offset,
       md.length);
+#endif
+
+    return 0;
+  }
+
+  // this would be an error related to the write failing because the log entry
+  // position had already been written, filled, or trimmed.
+  return -EROFS;
+}
+
+/*
+ * Overhead-free omap. This is omap passthrough mode.
+ */
+static int map_write_null(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls_zlog_bench_append_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: map_write_null(): failed to decode input");
+    return -EINVAL;
+  }
+
+  std::string key = u64tostr(op.position);
+  int ret = cls_cxx_map_set_val(hctx, key, &op.data);
+  if (ret < 0) {
+    CLS_ERR("ERROR: map_write_null: could not write entry: %d", ret);
+    return ret;
+  }
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "MAP WRITE NULL: %llu %llu %llu\n",
+      op.epoch,
+      op.position,
+      op.data.length());
+#endif
+
+  return 0;
+}
+
+struct cls_zlog_log_entry {
+  bufferlist data;
+  char flags;
+
+  cls_zlog_log_entry() {}
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    ::encode(data, bl);
+    ::encode(flags, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(bufferlist::iterator& bl) {
+    DECODE_START(1, bl);
+    ::decode(data, bl);
+    ::decode(flags, bl);
+    DECODE_FINISH(bl);
+  }
+};
+WRITE_CLASS_ENCODER(cls_zlog_log_entry)
+
+/*
+ * map/n1 full overhead version
+ */
+static int map_write_full(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls_zlog_bench_append_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: map_write_full: failed to decode input");
+    return -EINVAL;
+  }
+
+  int ret = check_epoch(hctx, op.epoch);
+  if (ret) {
+    CLS_ERR("NOTICE: map_write_full: stale epoch value");
+    return ret;
+  }
+
+  // lookup position in index
+  bufferlist bl;
+  std::string key = u64tostr(op.position);
+  ret = cls_cxx_map_get_val(hctx, key, &bl);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_LOG(0, "ERROR: map_write_full: failed to read index");
+    return ret;
+  }
+
+  // if position hasn't been written, we'll take it
+  if (ret == -ENOENT) {
+    // setup entry
+    cls_zlog_log_entry entry;
+    entry.data = op.data;
+
+    bufferlist entrybl;
+    ::encode(entry, entrybl);
+    ret = cls_cxx_map_set_val(hctx, key, &entrybl);
+    if (ret < 0) {
+      CLS_LOG(0, "ERROR: map_write_full(): failed to write index");
+      return ret;
+    }
+
+    // update max position? nope. in zlog we would update the current max
+    // position. but it should be much more efficient to spend some time
+    // figuring out what hte maximum position is when we need to, which is
+    // relatively infrequent.
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "MAP WRITE FULL: %llu %llu %llu\n",
+      op.epoch,
+      op.position,
+      op.data.length());
 #endif
 
     return 0;
@@ -312,4 +432,12 @@ void __cls_init()
   cls_register_cxx_method(h_class, "append_init",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append_init, &h_append_init);
+
+  cls_register_cxx_method(h_class, "map_write_null",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          map_write_null, &h_map_write_null);
+
+  cls_register_cxx_method(h_class, "map_write_full",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          map_write_full, &h_map_write_full);
 }
