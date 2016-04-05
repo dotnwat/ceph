@@ -10,14 +10,17 @@ CLS_NAME(zlog_bench)
 cls_handle_t h_class;
 
 cls_method_handle_t h_append;
+cls_method_handle_t h_append_wronly;
 cls_method_handle_t h_append_init;
 cls_method_handle_t h_append_omap_index;
 cls_method_handle_t h_append_check_epoch;
 
 cls_method_handle_t h_map_write_null;
+cls_method_handle_t h_map_write_null_wronly;
 cls_method_handle_t h_map_write_full;
 
 cls_method_handle_t h_stream_write_null;
+cls_method_handle_t h_stream_write_null_wronly;
 cls_method_handle_t h_stream_write_full;
 
 #define ZLOG_EPOCH_KEY "____zlog.epoch"
@@ -71,6 +74,11 @@ static int append(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 #endif
 
   return 0;
+}
+
+static int append_wronly(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  return append(hctx, in, out);
 }
 
 static int get_epoch(cls_method_context_t hctx, uint64_t *pepoch)
@@ -329,6 +337,11 @@ static int map_write_null(cls_method_context_t hctx, bufferlist *in, bufferlist 
   return 0;
 }
 
+static int map_write_null_wronly(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  return map_write_null(hctx, in, out);
+}
+
 struct cls_zlog_log_entry {
   bufferlist data;
   char flags;
@@ -449,6 +462,11 @@ static int stream_write_null(cls_method_context_t hctx, bufferlist *in, bufferli
   return 0;
 }
 
+static int stream_write_null_wronly(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  return stream_write_null(hctx, in, out);
+}
+
 struct cls_zlog_log_entry_small_md {
   char flags;
 
@@ -551,6 +569,10 @@ void __cls_init()
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append, &h_append);
 
+  cls_register_cxx_method(h_class, "append_wronly",
+                          CLS_METHOD_WR,
+                          append_wronly, &h_append_wronly);
+
   cls_register_cxx_method(h_class, "append_check_epoch",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append_check_epoch, &h_append_check_epoch);
@@ -567,6 +589,10 @@ void __cls_init()
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           map_write_null, &h_map_write_null);
 
+  cls_register_cxx_method(h_class, "map_write_null_wronly",
+                          CLS_METHOD_WR,
+                          map_write_null_wronly, &h_map_write_null_wronly);
+
   cls_register_cxx_method(h_class, "map_write_full",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           map_write_full, &h_map_write_full);
@@ -574,6 +600,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "stream_write_null",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           stream_write_null, &h_stream_write_null);
+
+  cls_register_cxx_method(h_class, "stream_write_null_wronly",
+                          CLS_METHOD_WR,
+                          stream_write_null_wronly, &h_stream_write_null_wronly);
 
   cls_register_cxx_method(h_class, "stream_write_full",
                           CLS_METHOD_RD | CLS_METHOD_WR,
