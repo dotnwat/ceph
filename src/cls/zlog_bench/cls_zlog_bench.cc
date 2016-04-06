@@ -13,8 +13,10 @@ cls_method_handle_t h_append;
 cls_method_handle_t h_append_sim_hdr_idx;
 cls_method_handle_t h_append_wronly;
 cls_method_handle_t h_append_init;
+cls_method_handle_t h_append_hdr_init;
 cls_method_handle_t h_append_omap_index;
 cls_method_handle_t h_append_check_epoch;
+cls_method_handle_t h_append_check_epoch_hdr;
 
 cls_method_handle_t h_map_write_null;
 cls_method_handle_t h_map_write_null_wronly;
@@ -290,6 +292,117 @@ static int append_check_epoch(cls_method_context_t hctx, bufferlist *in, bufferl
 
 #ifdef ZLOG_PRINT_DEBUG
   CLS_LOG(0, "APPEND CHECK EPOCH: %llu %llu %llu\n",
+      (unsigned long long)op.epoch,
+      (unsigned long long)op.position,
+      (unsigned long long)op.data.length());
+#endif
+
+  return 0;
+}
+
+static int append_hdr_init(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  uint64_t size;
+  int ret = cls_cxx_stat(hctx, &size, NULL);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_ERR("ERROR: append hdr init: stat error: %d", ret);
+    return ret;
+  }
+
+  if (ret != -ENOENT && size != 0) {
+    CLS_ERR("ERROR: append hdr init: unexpected size");
+    return -EIO;
+  }
+
+  // the header
+  char buf[4096];
+
+  // set epoch at the beginning of the header
+  uint64_t *epoch = (uint64_t*)(&buf[0]);
+  *epoch = 10;
+
+  bufferlist bl;
+  bl.append(buf, sizeof(buf));
+
+  ret = cls_cxx_write(hctx, 0, bl.length(), &bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: append hdr init: failed to initialize object");
+    return ret;
+  }
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "APPEND INIT NEW EPOCH HEADERRRRR = 10");
+#endif
+
+  return 0;
+}
+
+/*
+ * Stream append with epoch guard where guard is in header.
+ */
+static int append_check_epoch_hdr(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls_zlog_bench_append_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: append(): failed to decode input");
+    return -EINVAL;
+  }
+
+  /*
+   * Read the epoch guard. We store it at offset 0 of the object. The epoch
+   * is stored as 64 bit value.
+   */
+  uint64_t cur_epoch;
+  bufferlist epoch_bl;
+  int ret = cls_cxx_read(hctx, 0, sizeof(cur_epoch), &epoch_bl);
+  if (ret < 0) {
+    if (ret == -ENOENT) {
+      CLS_ERR("ERROR: append check epoch hdr: init?");
+      return ret;
+    }
+    CLS_ERR("ERROR: append check epoch hdr: error %d", ret);
+    return ret;
+  }
+
+  if (epoch_bl.length() != sizeof(cur_epoch)) {
+    CLS_ERR("ERROR: append check epoch hdr: wrong epoch length");
+    return -EIO;
+  }
+
+  // this isn't actually portable... but for these tests it doesn't matter
+  epoch_bl.copy(0, sizeof(cur_epoch), (char*)(&cur_epoch));
+
+  // epoch not old?
+  if (op.epoch <= cur_epoch) {
+    CLS_ERR("NOTICE: append check epoch hdr: old epoch");
+    return -EINVAL;
+  }
+
+  /*
+   * proceed with append
+   */
+  uint64_t size;
+  ret = cls_cxx_stat(hctx, &size, NULL);
+  if (ret) {
+    CLS_ERR("ERROR: append_check_epoch hdr: stat error: %d", ret);
+    return ret;
+  }
+
+  // we don't need to do anything special here like shift the write past the
+  // header in the initial case because we depend on the initialization
+  // function to initially do a 4K write for the header.
+
+  ret = cls_cxx_write(hctx, size, op.data.length(), &op.data);
+  if (ret) {
+    CLS_ERR("ERROR: append_check_epoch hdr: write error: %d", ret);
+    return ret;
+  }
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "APPEND CHECK EPOCH HEADER: %llu %llu %llu\n",
       (unsigned long long)op.epoch,
       (unsigned long long)op.position,
       (unsigned long long)op.data.length());
@@ -798,6 +911,10 @@ void __cls_init()
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append_check_epoch, &h_append_check_epoch);
 
+  cls_register_cxx_method(h_class, "append_check_epoch_hdr",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          append_check_epoch_hdr, &h_append_check_epoch_hdr);
+
   cls_register_cxx_method(h_class, "append_omap_index",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append_omap_index, &h_append_omap_index);
@@ -805,6 +922,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "append_init",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append_init, &h_append_init);
+
+  cls_register_cxx_method(h_class, "append_hdr_init",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          append_hdr_init, &h_append_hdr_init);
 
   cls_register_cxx_method(h_class, "map_write_null",
                           CLS_METHOD_RD | CLS_METHOD_WR,
