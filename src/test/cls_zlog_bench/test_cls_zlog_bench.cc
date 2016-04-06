@@ -647,6 +647,52 @@ TEST(ClsZlogBench, StreamWriteNull) {
   ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
 }
 
+TEST(ClsZlogBench, StreamWriteNullSimInlineIdx) {
+  librados::Rados cluster;
+  std::string pool_name = get_temp_pool_name();
+  ASSERT_EQ("", create_one_pool_pp(pool_name, cluster));
+  librados::IoCtx ioctx;
+  cluster.ioctx_create(pool_name.c_str(), ioctx);
+
+  int ret = ioctx.create("oid", true);
+  ASSERT_EQ(ret, 0);
+
+  uint64_t size;
+  ret = ioctx.stat("oid", &size, NULL);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(size, 0ULL);
+
+  char buf[1023];
+  ceph::bufferlist data;
+  data.append(buf, sizeof(buf));
+
+  // append #1
+  librados::ObjectWriteOperation *op = new librados::ObjectWriteOperation;
+  zlog_bench::cls_zlog_bench_stream_write_null_sim_inline_idx(*op, 123, 0, data);
+  ret = ioctx.operate("oid", op);
+  ASSERT_EQ(ret, 0);
+
+  ret = ioctx.stat("oid", &size, NULL);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(size, (unsigned)1024);
+
+  // append #2
+  for (int i = 1; i <= 10; i++) {
+    data.clear();
+    data.append(buf, sizeof(buf));
+    op = new librados::ObjectWriteOperation;
+    zlog_bench::cls_zlog_bench_stream_write_null_sim_inline_idx(*op, 123, i*1023, data);
+    ret = ioctx.operate("oid", op);
+    ASSERT_EQ(ret, 0);
+  }
+
+  ret = ioctx.stat("oid", &size, NULL);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(size, (unsigned)11*1024);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
+}
+
 TEST(ClsZlogBench, StreamWriteNullSimHdrIdx) {
   librados::Rados cluster;
   std::string pool_name = get_temp_pool_name();

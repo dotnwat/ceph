@@ -119,6 +119,18 @@ namespace zlog_bench {
     op.exec("zlog_bench", "stream_write_null", in);
   }
 
+  void cls_zlog_bench_stream_write_null_sim_inline_idx(librados::ObjectWriteOperation& op,
+      uint64_t epoch, uint64_t position, ceph::bufferlist& data)
+  {
+    bufferlist in;
+    cls_zlog_bench_append_op call;
+    call.epoch = epoch;
+    call.position = position;
+    call.data = data;
+    ::encode(call, in);
+    op.exec("zlog_bench", "stream_write_null_sim_inline_idx", in);
+  }
+
   void cls_zlog_bench_stream_write_null_sim_hdr_idx(librados::ObjectWriteOperation& op,
       uint64_t epoch, uint64_t position, ceph::bufferlist& data)
   {
