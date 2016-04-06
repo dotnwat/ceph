@@ -741,10 +741,43 @@ static int stream_write_null_sim_inline_idx(cls_method_context_t hctx, bufferlis
     return -EINVAL;
   }
 
+  /*
+   * Read the epoch guard. We store it at offset 0 of the object. The epoch
+   * is stored as 64 bit value.
+   */
+  uint64_t cur_epoch;
+  bufferlist epoch_bl;
+  int ret = cls_cxx_read(hctx, 0, sizeof(cur_epoch), &epoch_bl);
+  if (ret < 0) {
+    if (ret == -ENOENT) {
+      CLS_ERR("ERROR: append check epoch hdr: init?");
+      return ret;
+    }
+    CLS_ERR("ERROR: append check epoch hdr: error %d", ret);
+    return ret;
+  }
+
+  if (epoch_bl.length() != sizeof(cur_epoch)) {
+    CLS_ERR("ERROR: append check epoch hdr: wrong epoch length");
+    return -EIO;
+  }
+
+  // this isn't actually portable... but for these tests it doesn't matter
+  epoch_bl.copy(0, sizeof(cur_epoch), (char*)(&cur_epoch));
+
+  // epoch not old?
+  if (op.epoch <= cur_epoch) {
+    CLS_ERR("NOTICE: append check epoch hdr: old epoch");
+    return -EINVAL;
+  }
+
+  // size of our "index header"
+  const int header_size = 4096;
+
   // we'll keep the simulated index entry at the offset we are writing the
   // entry as a header. its the first byte.
   bufferlist idx_bl;
-  int ret = cls_cxx_read(hctx, op.position, 1, &idx_bl);
+  ret = cls_cxx_read(hctx, header_size + op.position, 1, &idx_bl);
   if (ret < 0 && ret != -ENOENT) {
     CLS_ERR("ERROR: stream write sim inline %d", ret);
     return ret;
@@ -753,7 +786,6 @@ static int stream_write_null_sim_inline_idx(cls_method_context_t hctx, bufferlis
   // just ignore whatever happens here. normally we'd check stuff about if the
   // object is new or not initialized, and verify the write by looking at the
   // index entry.
-
 
   /*
    * do the write and update the index entry. keep it really simple... we
@@ -766,7 +798,7 @@ static int stream_write_null_sim_inline_idx(cls_method_context_t hctx, bufferlis
   uint8_t flags;
   op.data.append((char*)(&flags), sizeof(flags));
 
-  ret = cls_cxx_write(hctx, offset, op.data.length(), &op.data);
+  ret = cls_cxx_write(hctx, header_size + offset, op.data.length(), &op.data);
   if (ret) {
     CLS_ERR("ERROR: stream write null sim inline: write error: %d", ret);
     return ret;

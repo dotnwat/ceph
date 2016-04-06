@@ -778,33 +778,63 @@ TEST(ClsZlogBench, StreamWriteNullSimInlineIdx) {
   ASSERT_EQ(ret, 0);
   ASSERT_EQ(size, 0ULL);
 
-  char buf[1023];
+  char buf[1024];
   ceph::bufferlist data;
   data.append(buf, sizeof(buf));
 
-  // append #1
+  // append failure
   librados::ObjectWriteOperation *op = new librados::ObjectWriteOperation;
+  zlog_bench::cls_zlog_bench_stream_write_null_sim_inline_idx(*op, 9, 0, data);
+  ret = ioctx.operate("oid", op);
+  ASSERT_EQ(ret, -EIO);
+
+  // init stored epoch
+  op = new librados::ObjectWriteOperation;
+  zlog_bench::cls_zlog_bench_stream_write_hdr_init(*op);
+  ret = ioctx.operate("oid", op);
+  ASSERT_EQ(ret, 0);
+
+  // size should now include the header
+  ret = ioctx.stat("oid", &size, NULL);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(size, 4096ULL);
+
+  // append #1 fails because old epoch
+  data.clear();
+  data.append(buf, sizeof(buf));
+  op = new librados::ObjectWriteOperation;
+  zlog_bench::cls_zlog_bench_stream_write_null_sim_inline_idx(*op, 9, 0, data);
+  ret = ioctx.operate("oid", op);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // object size is still 4096
+  ret = ioctx.stat("oid", &size, NULL);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(size, (unsigned)4096);
+
+  // append #1
+  data.clear();
+  data.append(buf, sizeof(buf));
+  op = new librados::ObjectWriteOperation;
   zlog_bench::cls_zlog_bench_stream_write_null_sim_inline_idx(*op, 123, 0, data);
   ret = ioctx.operate("oid", op);
   ASSERT_EQ(ret, 0);
 
   ret = ioctx.stat("oid", &size, NULL);
   ASSERT_EQ(ret, 0);
-  ASSERT_EQ(size, (unsigned)1024);
+  ASSERT_EQ(size, 4096+1+data.length());
 
   // append #2
-  for (int i = 1; i <= 10; i++) {
-    data.clear();
-    data.append(buf, sizeof(buf));
-    op = new librados::ObjectWriteOperation;
-    zlog_bench::cls_zlog_bench_stream_write_null_sim_inline_idx(*op, 123, i*1023, data);
-    ret = ioctx.operate("oid", op);
-    ASSERT_EQ(ret, 0);
-  }
+  data.clear();
+  data.append(buf, sizeof(buf));
+  op = new librados::ObjectWriteOperation;
+  zlog_bench::cls_zlog_bench_stream_write_null_sim_inline_idx(*op, 123, data.length(), data);
+  ret = ioctx.operate("oid", op);
+  ASSERT_EQ(ret, 0);
 
   ret = ioctx.stat("oid", &size, NULL);
   ASSERT_EQ(ret, 0);
-  ASSERT_EQ(size, (unsigned)11*1024);
+  ASSERT_EQ(size, 4096+2+2*data.length());
 
   ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
 }
