@@ -83,7 +83,7 @@ static int append(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
 /*
  * This is append
- *   - without epoch guard overhead
+ *   - with epoch guard overhead
  *   - simulated header index
  *
  * This simulates the use of a 4K header at the beginning of the object that
@@ -105,47 +105,64 @@ static int append_sim_hdr_idx(cls_method_context_t hctx, bufferlist *in, bufferl
   }
 
   /*
+   * Read the epoch guard. We store it at offset 0 of the object. The epoch
+   * is stored as 64 bit value.
+   */
+  uint64_t cur_epoch;
+  bufferlist epoch_bl;
+  int ret = cls_cxx_read(hctx, 0, sizeof(cur_epoch), &epoch_bl);
+  if (ret < 0) {
+    if (ret == -ENOENT) {
+      CLS_ERR("ERROR: append check epoch hdr: init?");
+      return ret;
+    }
+    CLS_ERR("ERROR: append check epoch hdr: error %d", ret);
+    return ret;
+  }
+
+  if (epoch_bl.length() != sizeof(cur_epoch)) {
+    CLS_ERR("ERROR: append check epoch hdr: wrong epoch length");
+    return -EIO;
+  }
+
+  // this isn't actually portable... but for these tests it doesn't matter
+  epoch_bl.copy(0, sizeof(cur_epoch), (char*)(&cur_epoch));
+
+  // epoch not old?
+  if (op.epoch <= cur_epoch) {
+    CLS_ERR("NOTICE: append check epoch hdr: old epoch");
+    return -EINVAL;
+  }
+
+  /*
    * Get the size of the object. It will be where we are performing the
    * append. That location and the entry size is recroded in an index.
    */
   uint64_t size;
-  int ret = cls_cxx_stat(hctx, &size, NULL);
+  ret = cls_cxx_stat(hctx, &size, NULL);
   if (ret < 0 && ret != -ENOENT) {
     CLS_ERR("ERROR: append: stat error: %d", ret);
     return ret;
   }
 
-  // size of our "index header"
-  const int header_size = 4096;
+  // size of our "index header" sans the epoch at offset 0
+  const int header_size = 4096 - sizeof(cur_epoch);
 
   // index entry and offset (note this is not real)
   bufferlist idx_bl;
-  int idx_offset = cls_current_version(hctx) % header_size;
+  int idx_offset = sizeof(cur_epoch) + (cls_current_version(hctx) % header_size);
 
-  /*
-   * if the object is "new" then we start the first append to occur
-   * immediately after the object header. in a real implementation this would
-   * probably do some index initialization.
-   */
-  if (ret == -ENOENT || size == 0) {
-    size = header_size;
-    uint8_t flags;
-    idx_bl.append((char*)(&flags), sizeof(flags));
-  } else {
-    /*
-     * otherwise we read the "index" entry that will be used to verify this
-     * write. in a real implementation things would not be this simple, but in
-     * general would be required to do one or more reads to object state so
-     * this would be the best case scenario (read one byte).
-     */
-    assert(size >= header_size);
-    ret = cls_cxx_read(hctx, idx_offset, 1, &idx_bl);
-    if (ret < 0 && ret != -ENOENT) {
-      CLS_ERR("ERROR: append_sim_hdr_idx: read error %d", ret);
-      return ret;
-    }
+  // read the "index"
+  ret = cls_cxx_read(hctx, idx_offset, 1, &idx_bl);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_ERR("ERROR: append_sim_hdr_idx: read error %d", ret);
+    return ret;
   }
-  assert(idx_bl.length() == 1);
+
+  if (idx_bl.length() != 1) {
+    CLS_ERR("ERROR: invalid idx bl length");
+    return -EIO;
+  }
 
   // do the append
   ret = cls_cxx_write(hctx, size, op.data.length(), &op.data);
