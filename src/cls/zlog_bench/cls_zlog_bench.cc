@@ -21,6 +21,7 @@ cls_method_handle_t h_map_write_null_wronly;
 cls_method_handle_t h_map_write_full;
 
 cls_method_handle_t h_stream_write_null;
+cls_method_handle_t h_stream_write_null_sim_hdr_idx;
 cls_method_handle_t h_stream_write_null_wronly;
 cls_method_handle_t h_stream_write_full;
 
@@ -116,7 +117,7 @@ static int append_sim_hdr_idx(cls_method_context_t hctx, bufferlist *in, bufferl
 
   // index entry and offset (note this is not real)
   bufferlist idx_bl;
-  int idx_offset = (cls_current_version(hctx)*op.position) % header_size;
+  int idx_offset = cls_current_version(hctx) % header_size;
 
   /*
    * if the object is "new" then we start the first append to occur
@@ -560,6 +561,70 @@ static int stream_write_null(cls_method_context_t hctx, bufferlist *in, bufferli
   return 0;
 }
 
+static int stream_write_null_sim_hdr_idx(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls_zlog_bench_append_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: stream write null: failed to decode input");
+    return -EINVAL;
+  }
+
+  // size of our "index header"
+  const int header_size = 4096;
+
+  // index entry and offset (note this is not real)
+  bufferlist idx_bl;
+  int idx_offset = cls_current_version(hctx) % header_size;
+
+  // read up the "index entry"
+  int ret = cls_cxx_read(hctx, idx_offset, 1, &idx_bl);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_ERR("ERROR: writesim_hdr_idx: read error %d", ret);
+    return ret;
+  }
+
+  // deal with the empty object no object scenarios
+  if (ret == -ENOENT || idx_bl.length() == 0) {
+    uint8_t flags;
+    idx_bl.append((char*)(&flags), sizeof(flags));
+  }
+
+  /*
+   * A design would either communicate the logical position, or the offset of
+   * the write (probably the later). Here we avoid creating an entirely new
+   * data structure and just re-use op.position for the write offset.
+   *
+   * Note that here we shift the writes to leave room for the header
+   */
+  ret = cls_cxx_write(hctx, header_size + op.position, op.data.length(), &op.data);
+  if (ret) {
+    CLS_ERR("ERROR: stream write null: write error: %d", ret);
+    return ret;
+  }
+
+  // update the index
+  assert(idx_bl.length() == 1);
+  ret = cls_cxx_write(hctx, idx_offset, 1, &idx_bl);
+  if (ret) {
+    CLS_ERR("ERROR: write sim idx hdr: index write error: %d", ret);
+    return ret;
+  }
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "STREAM WRITE NULL SIM IDX HDR: %llu %llu %llu %llu %llu\n",
+      (unsigned long long)op.epoch,
+      (unsigned long long)op.position,
+      (unsigned long long)op.data.length(),
+      (unsigned long long)idx_offset,
+      (unsigned long long)idx_bl.length());
+#endif
+
+  return 0;
+}
+
 static int stream_write_null_wronly(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   return stream_write_null(hctx, in, out);
@@ -702,6 +767,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "stream_write_null",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           stream_write_null, &h_stream_write_null);
+
+  cls_register_cxx_method(h_class, "stream_write_null_sim_hdr_idx",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          stream_write_null_sim_hdr_idx, &h_stream_write_null_sim_hdr_idx);
 
   cls_register_cxx_method(h_class, "stream_write_null_wronly",
                           CLS_METHOD_WR,
