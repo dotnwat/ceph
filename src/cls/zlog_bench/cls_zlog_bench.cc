@@ -22,6 +22,7 @@ cls_method_handle_t h_map_write_full;
 
 cls_method_handle_t h_stream_write_null;
 cls_method_handle_t h_stream_write_null_sim_hdr_idx;
+cls_method_handle_t h_stream_write_null_sim_inline_idx;
 cls_method_handle_t h_stream_write_null_wronly;
 cls_method_handle_t h_stream_write_full;
 
@@ -561,6 +562,59 @@ static int stream_write_null(cls_method_context_t hctx, bufferlist *in, bufferli
   return 0;
 }
 
+static int stream_write_null_sim_inline_idx(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls_zlog_bench_append_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: stream write null: failed to decode input");
+    return -EINVAL;
+  }
+
+  // we'll keep the simulated index entry at the offset we are writing the
+  // entry as a header. its the first byte.
+  bufferlist idx_bl;
+  int ret = cls_cxx_read(hctx, op.position, 1, &idx_bl);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_ERR("ERROR: stream write sim inline %d", ret);
+    return ret;
+  }
+
+  // just ignore whatever happens here. normally we'd check stuff about if the
+  // object is new or not initialized, and verify the write by looking at the
+  // index entry.
+
+
+  /*
+   * do the write and update the index entry. keep it really simple... we
+   * don't try to do anything fancy except add on an extra byte for the
+   * index entry. the offset here accounts for the extra byte added to each
+   * entry.
+   */
+  uint64_t offset = op.position + (op.position / op.data.length());
+
+  uint8_t flags;
+  op.data.append((char*)(&flags), sizeof(flags));
+
+  ret = cls_cxx_write(hctx, offset, op.data.length(), &op.data);
+  if (ret) {
+    CLS_ERR("ERROR: stream write null sim inline: write error: %d", ret);
+    return ret;
+  }
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "STREAM WRITE NULL SIM INLINE IDX: %llu %llu %llu %llu\n",
+      (unsigned long long)op.epoch,
+      (unsigned long long)op.position,
+      (unsigned long long)offset,
+      (unsigned long long)op.data.length());
+#endif
+
+  return 0;
+}
+
 static int stream_write_null_sim_hdr_idx(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   cls_zlog_bench_append_op op;
@@ -767,6 +821,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "stream_write_null",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           stream_write_null, &h_stream_write_null);
+
+  cls_register_cxx_method(h_class, "stream_write_null_sim_inline_idx",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          stream_write_null_sim_inline_idx, &h_stream_write_null_sim_inline_idx);
 
   cls_register_cxx_method(h_class, "stream_write_null_sim_hdr_idx",
                           CLS_METHOD_RD | CLS_METHOD_WR,
