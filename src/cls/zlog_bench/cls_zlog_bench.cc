@@ -10,6 +10,7 @@ CLS_NAME(zlog_bench)
 cls_handle_t h_class;
 
 cls_method_handle_t h_append;
+cls_method_handle_t h_append_sim_hdr_idx;
 cls_method_handle_t h_append_wronly;
 cls_method_handle_t h_append_init;
 cls_method_handle_t h_append_omap_index;
@@ -71,6 +72,103 @@ static int append(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
       (unsigned long long)op.epoch,
       (unsigned long long)op.position,
       (unsigned long long)op.data.length());
+#endif
+
+  return 0;
+}
+
+/*
+ * This is append
+ *   - without epoch guard overhead
+ *   - simulated header index
+ *
+ * This simulates the use of a 4K header at the beginning of the object that
+ * is capable of indexing the contents (logical translation and protocol
+ * enforcement). We further make the assumption that this index is amazing...
+ * even with dynamic sized entries we can read and write exactly one byte from
+ * this region to implement what we need. Thus this is a lower bound on
+ * overhead.
+ */
+static int append_sim_hdr_idx(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls_zlog_bench_append_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: append(): failed to decode input");
+    return -EINVAL;
+  }
+
+  /*
+   * Get the size of the object. It will be where we are performing the
+   * append. That location and the entry size is recroded in an index.
+   */
+  uint64_t size;
+  int ret = cls_cxx_stat(hctx, &size, NULL);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_ERR("ERROR: append: stat error: %d", ret);
+    return ret;
+  }
+
+  // size of our "index header"
+  const int header_size = 4096;
+
+  // index entry and offset (note this is not real)
+  bufferlist idx_bl;
+  int idx_offset = (cls_current_version(hctx)*op.position) % header_size;
+
+  /*
+   * if the object is "new" then we start the first append to occur
+   * immediately after the object header. in a real implementation this would
+   * probably do some index initialization.
+   */
+  if (ret == -ENOENT || size == 0) {
+    size = header_size;
+    uint8_t flags;
+    idx_bl.append((char*)(&flags), sizeof(flags));
+  } else {
+    /*
+     * otherwise we read the "index" entry that will be used to verify this
+     * write. in a real implementation things would not be this simple, but in
+     * general would be required to do one or more reads to object state so
+     * this would be the best case scenario (read one byte).
+     */
+    assert(size >= header_size);
+    ret = cls_cxx_read(hctx, idx_offset, 1, &idx_bl);
+    if (ret < 0 && ret != -ENOENT) {
+      CLS_ERR("ERROR: append_sim_hdr_idx: read error %d", ret);
+      return ret;
+    }
+  }
+  assert(idx_bl.length() == 1);
+
+  // do the append
+  ret = cls_cxx_write(hctx, size, op.data.length(), &op.data);
+  if (ret) {
+    CLS_ERR("ERROR: append: write error: %d", ret);
+    return ret;
+  }
+
+  /*
+   * update the index. in a real implementation this would save the offset and
+   * length of the append within the index entry being updated here.
+   */
+  assert(idx_bl.length() == 1);
+  ret = cls_cxx_write(hctx, idx_offset, 1, &idx_bl);
+  if (ret) {
+    CLS_ERR("ERROR: append sim idx hdr: index write error: %d", ret);
+    return ret;
+  }
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "APPEND SIM HDR IDX: %llu %llu %llu idx_off=%llu %llu size=%llu\n",
+      (unsigned long long)op.epoch,
+      (unsigned long long)op.position,
+      (unsigned long long)op.data.length(),
+      (unsigned long long)idx_offset,
+      (unsigned long long)idx_bl.length(),
+      (unsigned long long)size);
 #endif
 
   return 0;
@@ -568,6 +666,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "append",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append, &h_append);
+
+  cls_register_cxx_method(h_class, "append_sim_hdr_idx",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          append_sim_hdr_idx, &h_append_sim_hdr_idx);
 
   cls_register_cxx_method(h_class, "append_wronly",
                           CLS_METHOD_WR,

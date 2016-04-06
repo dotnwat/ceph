@@ -17,6 +17,18 @@ namespace zlog_bench {
     op.exec("zlog_bench", "append", in);
   }
 
+  void cls_zlog_bench_append_sim_hdr_idx(librados::ObjectWriteOperation& op, uint64_t epoch,
+      uint64_t position, ceph::bufferlist& data)
+  {
+    bufferlist in;
+    cls_zlog_bench_append_op call;
+    call.epoch = epoch;
+    call.position = position;
+    call.data = data;
+    ::encode(call, in);
+    op.exec("zlog_bench", "append_sim_hdr_idx", in);
+  }
+
   void cls_zlog_bench_append_wronly(librados::ObjectWriteOperation& op, uint64_t epoch,
       uint64_t position, ceph::bufferlist& data)
   {
