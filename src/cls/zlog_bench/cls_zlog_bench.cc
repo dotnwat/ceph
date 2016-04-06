@@ -23,6 +23,7 @@ cls_method_handle_t h_map_write_null_wronly;
 cls_method_handle_t h_map_write_full;
 
 cls_method_handle_t h_stream_write_null;
+cls_method_handle_t h_stream_write_hdr_init;
 cls_method_handle_t h_stream_write_null_sim_hdr_idx;
 cls_method_handle_t h_stream_write_null_sim_inline_idx;
 cls_method_handle_t h_stream_write_null_wronly;
@@ -692,6 +693,43 @@ static int stream_write_null(cls_method_context_t hctx, bufferlist *in, bufferli
   return 0;
 }
 
+static int stream_write_hdr_init(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  uint64_t size;
+  int ret = cls_cxx_stat(hctx, &size, NULL);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_ERR("ERROR: append hdr init: stat error: %d", ret);
+    return ret;
+  }
+
+  if (ret != -ENOENT && size != 0) {
+    CLS_ERR("ERROR: append hdr init: unexpected size");
+    return -EIO;
+  }
+
+  // the header
+  char buf[4096];
+
+  // set epoch at the beginning of the header
+  uint64_t *epoch = (uint64_t*)(&buf[0]);
+  *epoch = 10;
+
+  bufferlist bl;
+  bl.append(buf, sizeof(buf));
+
+  ret = cls_cxx_write(hctx, 0, bl.length(), &bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: append hdr init: failed to initialize object");
+    return ret;
+  }
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "STREAM WRITE INIT NEW EPOCH HEADERRRRR = 10");
+#endif
+
+  return 0;
+}
+
 static int stream_write_null_sim_inline_idx(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   cls_zlog_bench_append_op op;
@@ -756,24 +794,54 @@ static int stream_write_null_sim_hdr_idx(cls_method_context_t hctx, bufferlist *
     return -EINVAL;
   }
 
+  /*
+   * Read the epoch guard. We store it at offset 0 of the object. The epoch
+   * is stored as 64 bit value.
+   */
+  uint64_t cur_epoch;
+  bufferlist epoch_bl;
+  int ret = cls_cxx_read(hctx, 0, sizeof(cur_epoch), &epoch_bl);
+  if (ret < 0) {
+    if (ret == -ENOENT) {
+      CLS_ERR("ERROR: append check epoch hdr: init?");
+      return ret;
+    }
+    CLS_ERR("ERROR: append check epoch hdr: error %d", ret);
+    return ret;
+  }
+
+  if (epoch_bl.length() != sizeof(cur_epoch)) {
+    CLS_ERR("ERROR: append check epoch hdr: wrong epoch length");
+    return -EIO;
+  }
+
+  // this isn't actually portable... but for these tests it doesn't matter
+  epoch_bl.copy(0, sizeof(cur_epoch), (char*)(&cur_epoch));
+
+  // epoch not old?
+  if (op.epoch <= cur_epoch) {
+    CLS_ERR("NOTICE: append check epoch hdr: old epoch");
+    return -EINVAL;
+  }
+
   // size of our "index header"
   const int header_size = 4096;
 
   // index entry and offset (note this is not real)
   bufferlist idx_bl;
-  int idx_offset = cls_current_version(hctx) % header_size;
+  int idx_offset = sizeof(cur_epoch) + (cls_current_version(hctx) %
+      (header_size - sizeof(cur_epoch)));
 
   // read up the "index entry"
-  int ret = cls_cxx_read(hctx, idx_offset, 1, &idx_bl);
+  ret = cls_cxx_read(hctx, idx_offset, 1, &idx_bl);
   if (ret < 0 && ret != -ENOENT) {
     CLS_ERR("ERROR: writesim_hdr_idx: read error %d", ret);
     return ret;
   }
 
-  // deal with the empty object no object scenarios
-  if (ret == -ENOENT || idx_bl.length() == 0) {
-    uint8_t flags;
-    idx_bl.append((char*)(&flags), sizeof(flags));
+  if (idx_bl.length() != 1) {
+    CLS_ERR("ERROR: invalid idx bl length");
+    return -EIO;
   }
 
   /*
@@ -959,6 +1027,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "stream_write_null",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           stream_write_null, &h_stream_write_null);
+
+  cls_register_cxx_method(h_class, "stream_write_hdr_init",
+                          CLS_METHOD_RD | CLS_METHOD_WR,
+                          stream_write_hdr_init, &h_stream_write_hdr_init);
 
   cls_register_cxx_method(h_class, "stream_write_null_sim_inline_idx",
                           CLS_METHOD_RD | CLS_METHOD_WR,

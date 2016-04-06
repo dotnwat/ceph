@@ -53,6 +53,12 @@ namespace zlog_bench {
     op.exec("zlog_bench", "append_hdr_init", in);
   }
 
+  void cls_zlog_bench_stream_write_hdr_init(librados::ObjectWriteOperation& op)
+  {
+    bufferlist in;
+    op.exec("zlog_bench", "stream_write_hdr_init", in);
+  }
+
   void cls_zlog_bench_append_check_epoch(librados::ObjectWriteOperation& op,
       uint64_t epoch, uint64_t position, ceph::bufferlist& data)
   {
