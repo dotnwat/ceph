@@ -10,6 +10,7 @@ CLS_NAME(zlog_bench)
 cls_handle_t h_class;
 
 cls_method_handle_t h_append;
+cls_method_handle_t h_append_plus_xtn;
 cls_method_handle_t h_append_sim_hdr_idx;
 cls_method_handle_t h_append_wronly;
 cls_method_handle_t h_append_init;
@@ -74,6 +75,53 @@ static int append(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
 #ifdef ZLOG_PRINT_DEBUG
   CLS_LOG(0, "APPEND NO INDEX: %llu %llu %llu\n",
+      (unsigned long long)op.epoch,
+      (unsigned long long)op.position,
+      (unsigned long long)op.data.length());
+#endif
+
+  return 0;
+}
+
+static int append_plus_xtn(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  cls_zlog_bench_append_op op;
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(op, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: append(): failed to decode input");
+    return -EINVAL;
+  }
+
+  uint64_t size;
+  int ret = cls_cxx_stat(hctx, &size, NULL);
+  if (ret < 0 && ret != -ENOENT) {
+    CLS_ERR("ERROR: append: stat error: %d", ret);
+    return ret;
+  }
+
+  if (ret == -ENOENT)
+    size = 0;
+
+  ret = cls_cxx_write(hctx, size, op.data.length(), &op.data);
+  if (ret) {
+    CLS_ERR("ERROR: append: write error: %d", ret);
+    return ret;
+  }
+
+  char buf[12];
+  bufferlist bl;
+  bl.append(buf, sizeof(buf));
+
+  ret = cls_cxx_write(hctx, size+op.data.length(), bl.length(), &bl);
+  if (ret) {
+    CLS_ERR("ERROR: append: write error: %d", ret);
+    return ret;
+  }
+
+#ifdef ZLOG_PRINT_DEBUG
+  CLS_LOG(0, "APPEND NO INDEX PLUS XTN: %llu %llu %llu\n",
       (unsigned long long)op.epoch,
       (unsigned long long)op.position,
       (unsigned long long)op.data.length());
@@ -1015,6 +1063,10 @@ void __cls_init()
   cls_register_cxx_method(h_class, "append",
                           CLS_METHOD_RD | CLS_METHOD_WR,
                           append, &h_append);
+
+  cls_register_cxx_method(h_class, "append_plus_xtn",
+                          CLS_METHOD_WR,
+                          append_plus_xtn, &h_append_plus_xtn);
 
   cls_register_cxx_method(h_class, "append_sim_hdr_idx",
                           CLS_METHOD_RD | CLS_METHOD_WR,
