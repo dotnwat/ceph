@@ -255,6 +255,8 @@ extern const char *ceph_osd_state_name(int s);
 	/* cache pin/unpin */						    \
 	f(CACHE_PIN,	__CEPH_OSD_OP(WR, DATA, 36),	"cache-pin")        \
 	f(CACHE_UNPIN,	__CEPH_OSD_OP(WR, DATA, 37),	"cache-unpin")      \
+                    \
+	f(ZLOG_APPEND_HDR_EPOCH,	__CEPH_OSD_OP(RMW, DATA, 38),	"zlog_append_hdr_epoch")	    \
 									    \
 	/** multi **/							    \
 	f(CLONERANGE,	__CEPH_OSD_OP(WR, MULTI, 1),	"clonerange")	    \
@@ -355,6 +357,7 @@ static inline int ceph_osd_op_uses_extent(int op)
 	case CEPH_OSD_OP_ZERO:
 	case CEPH_OSD_OP_APPEND:
 	case CEPH_OSD_OP_TRIMTRUNC:
+	case CEPH_OSD_OP_ZLOG_APPEND_HDR_EPOCH:
 		return true;
 	default:
 		return false;

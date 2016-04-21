@@ -909,6 +909,9 @@ namespace librados
 		  size_t len);
     int aio_write_full(const std::string& oid, AioCompletion *c, const bufferlist& bl);
 
+    int aio_zlog_append_check_epoch_header(const std::string& oid,
+        AioCompletion *c, uint64_t epoch, const bufferlist& bl, size_t len);
+
     /**
      * Asychronously remove an object
      *

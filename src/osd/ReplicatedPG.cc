@@ -5443,6 +5443,23 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
     
 
       // -- fancy writers --
+#if 1
+    case CEPH_OSD_OP_ZLOG_APPEND_HDR_EPOCH:
+      {
+        bufferlist outbl;
+        vector<OSDOp> nops(1);
+        OSDOp& newop = nops[0];
+        newop.op.op = CEPH_OSD_OP_SYNC_READ;
+        newop.op.extent.offset = 0;
+        newop.op.extent.length = sizeof(uint64_t);
+        newop.op.flags = 0;
+        result = do_osd_ops(ctx, nops);
+        assert(result == 0);
+        outbl.claim(newop.outdata);
+        assert(outbl.length() == sizeof(uint64_t));
+      }
+#endif
+
     case CEPH_OSD_OP_APPEND:
       {
 	tracepoint(osd, do_osd_op_pre_append, soid.oid.name.c_str(), soid.snap.val, oi.size, oi.truncate_seq, op.extent.offset, op.extent.length, op.extent.truncate_size, op.extent.truncate_seq);
