@@ -2543,6 +2543,28 @@ public:
     op_submit(o, &tid);
     return tid;
   }
+  Op *prepare_zlog_append_check_epoch_header_op(
+    const object_t& oid, const object_locator_t& oloc,
+    uint64_t epoch, uint64_t len, const SnapContext& snapc,
+    const bufferlist &bl, ceph::real_time mtime, int flags,
+    Context *onack, Context *oncommit,
+    version_t *objver = NULL,
+    ObjectOperation *extra_ops = NULL) {
+    vector<OSDOp> ops;
+    int i = init_ops(ops, 1, extra_ops);
+    ops[i].op.op = CEPH_OSD_OP_ZLOG_APPEND_HDR_EPOCH;
+    ops[i].op.extent.offset = 0;
+    ops[i].op.extent.length = len;
+    ops[i].op.extent.truncate_size = 0;
+    ops[i].op.extent.truncate_seq = 0;
+    ops[i].indata = bl;
+    // TODO:  pass on epoch
+    Op *o = new Op(oid, oloc, ops, flags | global_op_flags.read() |
+		   CEPH_OSD_FLAG_WRITE, onack, oncommit, objver);
+    o->mtime = mtime;
+    o->snapc = snapc;
+    return o;
+  }
   ceph_tid_t write_trunc(const object_t& oid, const object_locator_t& oloc,
 			 uint64_t off, uint64_t len, const SnapContext& snapc,
 			 const bufferlist &bl, ceph::real_time mtime, int flags,

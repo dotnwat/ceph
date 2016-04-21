@@ -92,6 +92,11 @@ ceph_kvstorebench_LDADD = $(LIBRADOS) $(CEPH_GLOBAL)
 bin_DEBUGPROGRAMS += ceph_kvstorebench
 endif
 
+ceph_zlog_iface_SOURCES = \
+    test/zlog/test.cc
+ceph_zlog_iface_LDADD = $(LIBRADOS) $(CEPH_GLOBAL) $(BOOST_PROGRAM_OPTIONS_LIBS)
+bin_DEBUGPROGRAMS += ceph_zlog_iface
+
 if LINUX
 ceph_test_rados_list_parallel_SOURCES = \
 	test/system/rados_list_parallel.cc \

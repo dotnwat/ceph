@@ -199,6 +199,8 @@ struct librados::IoCtxImpl {
 		const bufferlist& bl, size_t len, uint64_t off);
   int aio_append(const object_t &oid, AioCompletionImpl *c,
 		 const bufferlist& bl, size_t len);
+  int aio_zlog_append_check_epoch_header(const object_t &oid, AioCompletionImpl *c,
+		 uint64_t epoch, const bufferlist& bl, size_t len);
   int aio_write_full(const object_t &oid, AioCompletionImpl *c,
 		     const bufferlist& bl);
   int aio_remove(const object_t &oid, AioCompletionImpl *c);

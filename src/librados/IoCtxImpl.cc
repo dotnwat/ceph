@@ -907,6 +907,32 @@ int librados::IoCtxImpl::aio_append(const object_t &oid, AioCompletionImpl *c,
   return 0;
 }
 
+int librados::IoCtxImpl::aio_zlog_append_check_epoch_header(const object_t &oid,
+    AioCompletionImpl *c, uint64_t epoch, const bufferlist& bl, size_t len)
+{
+  auto ut = ceph::real_clock::now(client->cct);
+
+  if (len > UINT_MAX/2)
+    return -E2BIG;
+  /* can't write to a snapshot */
+  if (snap_seq != CEPH_NOSNAP)
+    return -EROFS;
+
+  Context *onack = new C_aio_Ack(c);
+  Context *onsafe = new C_aio_Safe(c);
+
+  c->io = this;
+  queue_aio_write(c);
+
+  Objecter::Op *o = objecter->prepare_zlog_append_check_epoch_header_op(
+    oid, oloc,
+    epoch, len, snapc, bl, ut, 0,
+    onack, onsafe, &c->objver);
+  objecter->op_submit(o, &c->tid);
+
+  return 0;
+}
+
 int librados::IoCtxImpl::aio_write_full(const object_t &oid,
 					AioCompletionImpl *c,
 					const bufferlist& bl)

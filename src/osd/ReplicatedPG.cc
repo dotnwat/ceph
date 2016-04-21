@@ -5446,6 +5446,7 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
 #if 1
     case CEPH_OSD_OP_ZLOG_APPEND_HDR_EPOCH:
       {
+        dout(0) << "ZLOG APPEND HDR EPOCH" << dendl;
         bufferlist outbl;
         vector<OSDOp> nops(1);
         OSDOp& newop = nops[0];

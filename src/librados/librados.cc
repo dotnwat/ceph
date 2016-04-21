@@ -1789,6 +1789,12 @@ int librados::IoCtx::aio_append(const std::string& oid, librados::AioCompletion 
   return io_ctx_impl->aio_append(oid, c->pc, bl, len);
 }
 
+int librados::IoCtx::aio_zlog_append_check_epoch_header(const std::string& oid,
+    AioCompletion *c, uint64_t epoch, const bufferlist& bl, size_t len)
+{
+  return io_ctx_impl->aio_zlog_append_check_epoch_header(oid, c->pc, epoch, bl, len);
+}
+
 int librados::IoCtx::aio_write_full(const std::string& oid, librados::AioCompletion *c,
 				    const bufferlist& bl)
 {
