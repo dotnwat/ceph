@@ -5443,10 +5443,14 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
     
 
       // -- fancy writers --
-#if 1
+
     case CEPH_OSD_OP_ZLOG_APPEND_HDR_EPOCH:
-      {
-        dout(0) << "ZLOG APPEND HDR EPOCH" << dendl;
+#if 0
+    case CEPH_OSD_OP_ZLOG_APPEND_OMAP_EPOCH:
+      if (op.op == CEPH_OSD_OP_ZLOG_APPEND_HDR_EPOCH) {
+#endif
+        {
+        //dout(0) << "ZLOG APPEND HDR EPOCH" << dendl;
         bufferlist outbl;
         vector<OSDOp> nops(1);
         OSDOp& newop = nops[0];
@@ -5458,6 +5462,81 @@ int ReplicatedPG::do_osd_ops(OpContext *ctx, vector<OSDOp>& ops)
         assert(result == 0);
         outbl.claim(newop.outdata);
         assert(outbl.length() == sizeof(uint64_t));
+        }
+
+        {
+        bufferlist outbl;
+        vector<OSDOp> nops(1);
+        OSDOp& newop = nops[0];
+        newop.op.op = CEPH_OSD_OP_SYNC_READ;
+        newop.op.extent.offset = 6000;
+        newop.op.extent.length = sizeof(uint64_t);
+        newop.op.flags = 0;
+        result = do_osd_ops(ctx, nops);
+        assert(result == 0);
+        outbl.claim(newop.outdata);
+        assert(outbl.length() == sizeof(uint64_t));
+        }
+
+        {
+	vector<OSDOp> nops(1);
+	OSDOp& newop = nops[0];
+	newop.op.op = CEPH_OSD_OP_WRITE;
+	newop.op.extent.offset = oi.size;
+	newop.op.extent.length = op.extent.length;
+	newop.op.extent.truncate_seq = oi.truncate_seq;
+        newop.indata = osd_op.indata;
+	result = do_osd_ops(ctx, nops);
+	osd_op.outdata.claim(newop.outdata);
+        }
+
+        {
+        bufferlist bl;
+        char buf[8];
+        bl.append(buf, sizeof(buf));
+
+	vector<OSDOp> nops(1);
+	OSDOp& newop = nops[0];
+	newop.op.op = CEPH_OSD_OP_WRITE;
+	newop.op.extent.offset = 6000;
+	newop.op.extent.length = bl.length();
+        newop.op.flags = 0;
+        newop.indata = bl;
+	result = do_osd_ops(ctx, nops);
+        }
+        break;
+
+#if 0
+      } else if (op.op == CEPH_OSD_OP_ZLOG_APPEND_OMAP_EPOCH) {
+
+        vector<OSDOp> ops(1);
+        OSDOp& op = ops[0];
+        int ret;
+
+        set<string> k;
+        k.insert("epoch");
+        ::encode(k, op.indata);
+
+        op.op.op = CEPH_OSD_OP_OMAPGETVALSBYKEYS;
+        result = do_osd_ops(ctx, ops);
+        assert(result == 0);
+
+        bufferlist outbl;
+        bufferlist::iterator iter = op.outdata.begin();
+        try {
+          map<string, bufferlist> m;
+
+          ::decode(m, iter);
+          map<string, bufferlist>::iterator iter = m.begin();
+          assert(iter != m.end());
+
+          outbl = iter->second;
+        } catch (buffer::error& e) {
+          assert(0);
+        }
+
+      } else {
+        assert(0);
       }
 #endif
 
