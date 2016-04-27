@@ -1,2 +1,3 @@
 usr/lib/librados.so.*
 usr/lib/librados_tp.so.*
+usr/lib/libcls_zlog_client.so.*
