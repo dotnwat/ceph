@@ -58,6 +58,10 @@ libcls_numops_client_la_SOURCES = cls/numops/cls_numops_client.cc
 noinst_LTLIBRARIES += libcls_numops_client.la
 DENCODER_DEPS += libcls_numops_client.la
 
+libcls_zlog_client_la_SOURCES = \
+	cls/zlog/cls_zlog_client.cc
+lib_LTLIBRARIES += libcls_zlog_client.la
+
 noinst_HEADERS += \
 	cls/lock/cls_lock_types.h \
 	cls/lock/cls_lock_ops.h \

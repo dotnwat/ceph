@@ -11,7 +11,8 @@ rados_include_DATA = \
 	$(srcdir)/include/buffer.h \
 	$(srcdir)/include/page.h \
 	$(srcdir)/include/crc32c.h \
-	$(srcdir)/include/memory.h
+	$(srcdir)/include/memory.h \
+	$(srcdir)/cls/zlog/cls_zlog_client.h
 
 
 if WITH_RBD
