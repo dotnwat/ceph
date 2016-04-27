@@ -184,10 +184,9 @@ ceph_test_cls_numops_LDADD = \
 ceph_test_cls_numops_CXXFLAGS = $(UNITTEST_CXXFLAGS)
 bin_DEBUGPROGRAMS += ceph_test_cls_numops
 
-ceph_test_cls_zlog_SOURCES = \
-	test/cls_zlog/test_cls_zlog.cc \
-	test/librados/test.cc
-ceph_test_cls_zlog_LDADD = $(LIBRADOS) libcls_zlog_client.la $(UNITTEST_LDADD)
+ceph_test_cls_zlog_SOURCES = test/cls_zlog/test_cls_zlog.cc
+ceph_test_cls_zlog_LDADD = $(LIBRADOS) libcls_zlog_client.la \
+    $(RADOS_TEST_LDADD) $(UNITTEST_LDADD)
 ceph_test_cls_zlog_CXXFLAGS = $(UNITTEST_CXXFLAGS)
 bin_DEBUGPROGRAMS += ceph_test_cls_zlog
 
