@@ -87,10 +87,10 @@ TEST(ClsZlog, AioFill) {
   ASSERT_EQ(c->get_return_value(), -ENOENT);
   delete c;
 
-  // set epoch to 100
+  // set epoch
   c = librados::Rados::aio_create_completion();
   op = new_op();
-  zlog::cls_zlog_seal(*op, 100);
+  zlog::cls_zlog_seal(*op, 99);
   ret = ioctx.aio_operate("obj", c, op);
   ASSERT_EQ(ret, 0);
   c->wait_for_complete();
@@ -257,9 +257,9 @@ TEST(ClsZlog, Fill) {
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, -ENOENT);
 
-  // set epoch to 100
+  // set epoch
   op = new_op();
-  zlog::cls_zlog_seal(*op, 100);
+  zlog::cls_zlog_seal(*op, 99);
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -420,9 +420,9 @@ TEST(ClsZlog, Write) {
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, -ENOENT);
 
-  // set epoch to 100
+  // set epoch
   op = new_op();
-  zlog::cls_zlog_seal(*op, 100);
+  zlog::cls_zlog_seal(*op, 99);
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -465,7 +465,7 @@ TEST(ClsZlog, Write) {
 
   // set epoch to 100
   op = new_op();
-  zlog::cls_zlog_seal(*op, 100);
+  zlog::cls_zlog_seal(*op, 99);
   ret = ioctx.operate("obj3", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -525,7 +525,7 @@ TEST(ClsZlog, Write) {
 
   // set epoch to 100 for obj2
   op = new_op();
-  zlog::cls_zlog_seal(*op, 100);
+  zlog::cls_zlog_seal(*op, 99);
   ret = ioctx.operate("obj2", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -609,9 +609,9 @@ TEST(ClsZlog, AioWrite) {
   ASSERT_EQ(c->get_return_value(), -ENOENT);
   delete c;
 
-  // set epoch to 100
+  // set epoch
   op = new_op();
-  zlog::cls_zlog_seal(*op, 100);
+  zlog::cls_zlog_seal(*op, 99);
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -675,9 +675,9 @@ TEST(ClsZlog, AioRead) {
   ASSERT_EQ(c->get_return_value(), -ENOENT);
   delete c;
 
-  // set epoch to 100
+  // set epoch
   librados::ObjectWriteOperation *wrop = new_op();
-  zlog::cls_zlog_seal(*wrop, 100);
+  zlog::cls_zlog_seal(*wrop, 99);
   ret = ioctx.operate("obj", wrop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -749,7 +749,7 @@ TEST(ClsZlog, AioRead) {
 
   ioctx.create("obj2", true);
   wrop = new_op();
-  zlog::cls_zlog_seal(*wrop, 100);
+  zlog::cls_zlog_seal(*wrop, 99);
   ret = ioctx.operate("obj2", wrop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -807,9 +807,9 @@ TEST(ClsZlog, Read) {
   ret = ioctx.operate("obj", op, &bl);
   ASSERT_EQ(ret, -ENOENT);
 
-  // set epoch to 100
+  // set epoch
   librados::ObjectWriteOperation *wrop = new_op();
-  zlog::cls_zlog_seal(*wrop, 100);
+  zlog::cls_zlog_seal(*wrop, 99);
   ret = ioctx.operate("obj", wrop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -865,7 +865,7 @@ TEST(ClsZlog, Read) {
 
   ioctx.create("obj2", true);
   wrop = new_op();
-  zlog::cls_zlog_seal(*wrop, 100);
+  zlog::cls_zlog_seal(*wrop, 99);
   ret = ioctx.operate("obj2", wrop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -934,9 +934,9 @@ TEST(ClsZlog, MaxPosition) {
   int ret = ioctx.exec("obj", "zlog", "max_position", inbl, outbl);
   ASSERT_EQ(ret, -EINVAL);
 
-  // set epoch to 100
+  // set epoch
   librados::ObjectWriteOperation *wrop = new_op();
-  zlog::cls_zlog_seal(*wrop, 100);
+  zlog::cls_zlog_seal(*wrop, 99);
   ret = ioctx.operate("obj", wrop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
@@ -1002,9 +1002,9 @@ TEST(ClsZlog, Trim) {
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, -ENOENT);
 
-  // set epoch to 100
+  // set epoch
   op = new_op();
-  zlog::cls_zlog_seal(*op, 100);
+  zlog::cls_zlog_seal(*op, 99);
   ret = ioctx.operate("obj", op);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
