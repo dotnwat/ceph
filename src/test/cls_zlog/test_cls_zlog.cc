@@ -170,7 +170,7 @@ TEST(ClsZlog, Fill) {
   zlog::cls_zlog_max_position(op2, 100, &pos, &status);
   ret = ioctx.operate("obj", &op2, &bl3);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_GT(pos, 0);
+  ASSERT_GT(pos, (unsigned)0);
 
   op = new_op();
   zlog::cls_zlog_fill(*op, 100, pos + 10);
@@ -257,7 +257,7 @@ TEST(ClsZlog, Write) {
   zlog::cls_zlog_max_position(op5, 100, &maxpos5, &status5);
   ret = ioctx.operate("obj", &op5, &bl5);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(maxpos5, 20);
+  ASSERT_EQ(maxpos5, (unsigned)20);
 
   bufferlist bl;
   bl.append("some data");
@@ -510,7 +510,7 @@ TEST(ClsZlog, MaxPosition) {
   ret = ioctx.operate("obj", &op2, &bl);
   ASSERT_EQ(status, zlog::CLS_ZLOG_OK);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(pos, 0);
+  ASSERT_EQ(pos, (unsigned)0);
 
   wop = new_op();
   zlog::cls_zlog_write(*wop, 100, 50, bl);
@@ -525,7 +525,7 @@ TEST(ClsZlog, MaxPosition) {
   ret = ioctx.operate("obj", &op3, &bl2);
   ASSERT_EQ(status, zlog::CLS_ZLOG_OK);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
-  ASSERT_EQ(pos, 50);
+  ASSERT_EQ(pos, (unsigned)50);
 
   ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
 }
