@@ -854,6 +854,12 @@ TEST(ClsZlog, MaxPosition) {
   ret = ioctx.operate("obj", wrop);
   ASSERT_EQ(ret, zlog::CLS_ZLOG_OK);
 
+  // make sure that the object exists for the next test so that max_position
+  // returns an error even when the object exists. we want to be able to know
+  // when a log is empty.
+  ret = ioctx.stat("obj", NULL, NULL);
+  ASSERT_EQ(ret, 0);
+
   bufferlist bl;
   uint64_t pos;
   int status;
