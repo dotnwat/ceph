@@ -157,9 +157,25 @@ static int check_epoch(cls_method_context_t hctx, uint64_t epoch)
 {
   bufferlist bl;
   int ret = cls_cxx_map_get_val(hctx, ZLOG_EPOCH_KEY, &bl);
-  if (ret < 0) {
+  if (ret < 0 && ret != -ENOENT) {
     CLS_LOG(10, "ERROR: check_epoch(): failed to read epoch (%d)", ret);
     return ret;
+  }
+
+  /*
+   * Handle initialization case. Effectively this simulates an initial sealed
+   * epoch of -1, which is always less than the epoch of an operation which is
+   * unsigned. This allows us to avoid the ugly case where initially we create
+   * epoch 0 and epoch 1, then immediately seal epoch 0.
+   *
+   * Note that this implies that even though the target object may not exist,
+   * and ZLOG_EPOCH_KEY may not be set, all unit tests must pass as if the
+   * real sealed epoch is -1 and that should be taken into account in the unit
+   * tests.
+   */
+  if (ret == -ENOENT) {
+    CLS_LOG(0, "NOTICE: treating non-init object as cur_epoch = -1");
+    return 0;
   }
 
   uint64_t cur_epoch;
@@ -508,6 +524,13 @@ static int seal(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   return CLS_ZLOG_OK;
 }
 
+/*
+ * TODO: Ideally max_position would be returned during seal, but given the way
+ * that rados object classes work we need to split the process. Normally we
+ * would seal an epoch and call this to get max position. We check the current
+ * epoch in this method too, but it isn't clear what the race conditions are
+ * and if they are bad. This needs a bit more thought.
+ */
 static int max_position(cls_method_context_t hctx, bufferlist *in,
     bufferlist *out)
 {
@@ -735,7 +758,7 @@ void __cls_init()
 			  write, &h_write);
 
   cls_register_cxx_method(h_class, "read",
-			  CLS_METHOD_RD,
+			  CLS_METHOD_RD | CLS_METHOD_WR,
 			  read, &h_read);
 
   cls_register_cxx_method(h_class, "trim",
