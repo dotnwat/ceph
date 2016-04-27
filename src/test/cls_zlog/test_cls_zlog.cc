@@ -1050,3 +1050,335 @@ TEST(ClsZlog, Trim) {
 
   ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
 }
+
+TEST(ClsZlog, SetProjection) {
+  Rados cluster;
+  std::string pool_name = get_temp_pool_name();
+  ASSERT_EQ("", create_one_pool_pp(pool_name, cluster));
+  IoCtx ioctx;
+  cluster.ioctx_create(pool_name.c_str(), ioctx);
+
+  // setting > 0 as first epoch fails (object doesn't exist)
+  librados::ObjectWriteOperation *op = new_op();
+  bufferlist inbl;
+  zlog::cls_zlog_set_projection(*op, 1, inbl);
+  int ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // setting == 0 as first epoch succeeds (object does exist)
+  ret = ioctx.create("obj", true);
+  ASSERT_EQ(ret, 0);
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 1, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // setting == 0 as first epoch succeeds
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 0, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, 0);
+
+  // skipping epoch fails
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 2, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // next epoch should be curr + 1
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 1, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, 0);
+
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 2, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, 0);
+
+  // skipping still fails
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 4, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // cannot overwrite
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 0, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, -EINVAL);
+
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 1, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, -EINVAL);
+
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 2, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, -EINVAL);
+
+  // ok was able to write the next one
+  op = new_op();
+  zlog::cls_zlog_set_projection(*op, 3, inbl);
+  ret = ioctx.operate("obj", op);
+  ASSERT_EQ(ret, 0);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
+}
+
+TEST(ClsZlog, GetLatestProjection) {
+  Rados cluster;
+  std::string pool_name = get_temp_pool_name();
+  ASSERT_EQ("", create_one_pool_pp(pool_name, cluster));
+  IoCtx ioctx;
+  cluster.ioctx_create(pool_name.c_str(), ioctx);
+
+  // op on non-existant object fails
+  librados::ObjectReadOperation *op = new_rop();
+  int opret;
+  uint64_t epoch;
+  bufferlist data;
+  zlog::cls_zlog_get_latest_projection(*op, &opret, &epoch, &data);
+  bufferlist tmp;
+  int ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(opret, -EIO);
+
+  // op on object without a set projection fails
+  ret = ioctx.create("obj", true);
+  ASSERT_EQ(ret, 0);
+  op = new_rop();
+  tmp.clear();
+  zlog::cls_zlog_get_latest_projection(*op, &opret, &epoch, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(opret, -ENOENT);
+
+  // set first epoch == 0
+  char buf[128];
+  memset(buf, 3, sizeof(buf));
+  bufferlist inbl;
+  inbl.append(buf, sizeof(buf));
+  librados::ObjectWriteOperation *wop = new_op();
+  zlog::cls_zlog_set_projection(*wop, 0, inbl);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, 0);
+
+  // reading latest should return epoch = 0 and data
+  op = new_rop();
+  tmp.clear();
+  zlog::cls_zlog_get_latest_projection(*op, &opret, &epoch, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(epoch, (uint64_t)0);
+  ASSERT_EQ(data, inbl);
+
+  // set epoch = 1
+  memset(buf, 4, sizeof(buf));
+  inbl.clear();
+  inbl.append(buf, sizeof(buf));
+  wop = new_op();
+  zlog::cls_zlog_set_projection(*wop, 1, inbl);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, 0);
+
+  // shoudl see epoch = 1
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_latest_projection(*op, &opret, &epoch, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(epoch, (uint64_t)1);
+  ASSERT_EQ(data, inbl);
+
+  // set epoch = 2, 3
+  wop = new_op();
+  zlog::cls_zlog_set_projection(*wop, 2, inbl);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, 0);
+
+  memset(buf, 7, sizeof(buf));
+  inbl.clear();
+  inbl.append(buf, sizeof(buf));
+  wop = new_op();
+  zlog::cls_zlog_set_projection(*wop, 3, inbl);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, 0);
+
+  // shoudl see epoch = 3
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_latest_projection(*op, &opret, &epoch, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(epoch, (uint64_t)3);
+  ASSERT_EQ(data, inbl);
+
+  // shoudl see epoch = 3
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_latest_projection(*op, &opret, &epoch, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(epoch, (uint64_t)3);
+  ASSERT_EQ(data, inbl);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
+}
+
+TEST(ClsZlog, GetProjection) {
+  Rados cluster;
+  std::string pool_name = get_temp_pool_name();
+  ASSERT_EQ("", create_one_pool_pp(pool_name, cluster));
+  IoCtx ioctx;
+  cluster.ioctx_create(pool_name.c_str(), ioctx);
+
+  // op on non-existant object fails
+  librados::ObjectReadOperation *op = new_rop();
+  int opret;
+  bufferlist data;
+  zlog::cls_zlog_get_projection(*op, &opret, 0, &data);
+  bufferlist tmp;
+  int ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(opret, -EIO);
+
+  // op on object without a set projection fails
+  ret = ioctx.create("obj", true);
+  ASSERT_EQ(ret, 0);
+  op = new_rop();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 0, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(opret, -ENOENT);
+
+  // op on object without a set projection fails
+  op = new_rop();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 1, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(opret, -ENOENT);
+
+  // set first epoch == 0
+  char buf[128];
+  memset(buf, 3, sizeof(buf));
+  bufferlist inbl0;
+  inbl0.append(buf, sizeof(buf));
+  librados::ObjectWriteOperation *wop = new_op();
+  zlog::cls_zlog_set_projection(*wop, 0, inbl0);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, 0);
+
+  // reading latest should return correct data
+  op = new_rop();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 0, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(data, inbl0);
+
+  // other epochs still fail
+  op = new_rop();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 1, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, -ENOENT);
+  ASSERT_EQ(opret, -ENOENT);
+
+  // set epoch = 1
+  memset(buf, 4, sizeof(buf));
+  bufferlist inbl1;
+  inbl1.append(buf, sizeof(buf));
+  wop = new_op();
+  zlog::cls_zlog_set_projection(*wop, 1, inbl1);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, 0);
+
+  // shoudl see epoch = 1
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 1, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(data, inbl1);
+
+  // set epoch = 2, 3
+  wop = new_op();
+  memset(buf, 1, sizeof(buf));
+  bufferlist inbl2;
+  inbl2.append(buf, sizeof(buf));
+  zlog::cls_zlog_set_projection(*wop, 2, inbl2);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, 0);
+
+  memset(buf, 7, sizeof(buf));
+  bufferlist inbl3;
+  inbl3.append(buf, sizeof(buf));
+  wop = new_op();
+  zlog::cls_zlog_set_projection(*wop, 3, inbl3);
+  ret = ioctx.operate("obj", wop);
+  ASSERT_EQ(ret, 0);
+
+  // shoudl see epoch = 3
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 3, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(data, inbl3);
+
+  // shoudl see epoch = 3
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 3, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(data, inbl3);
+
+  // shoudl still be able to see past epochs
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 0, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(data, inbl0);
+
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 1, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(data, inbl1);
+
+  op = new_rop();
+  data.clear();
+  tmp.clear();
+  zlog::cls_zlog_get_projection(*op, &opret, 2, &data);
+  ret = ioctx.operate("obj", op, &tmp);
+  ASSERT_EQ(ret, 0);
+  ASSERT_EQ(opret, 0);
+  ASSERT_EQ(data, inbl2);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, cluster));
+}

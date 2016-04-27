@@ -35,9 +35,14 @@ namespace zlog {
   void cls_zlog_max_position(librados::ObjectReadOperation& op, uint64_t epoch,
       uint64_t *pposition, int *pret);
 
-  void cls_zlog_set_projection(librados::ObjectWriteOperation& op);
+  void cls_zlog_set_projection(librados::ObjectWriteOperation& op,
+      uint64_t epoch, ceph::bufferlist& data);
 
-  int cls_zlog_get_projection(librados::IoCtx& ioctx, const std::string& oid, uint64_t *pepoch);
+  void cls_zlog_get_latest_projection(librados::ObjectReadOperation& op,
+      int *pret, uint64_t *pepoch, ceph::bufferlist *out);
+
+  void cls_zlog_get_projection(librados::ObjectReadOperation& op,
+      int *pret, uint64_t epoch, ceph::bufferlist *out);
 }
 
 #endif
