@@ -153,10 +153,31 @@ static inline int strtou64(const std::string value, uint64_t *out)
   return 0;
 }
 
-static int check_epoch(cls_method_context_t hctx, uint64_t epoch)
+static int get_epoch(cls_method_context_t hctx, uint64_t *pepoch)
 {
   bufferlist bl;
   int ret = cls_cxx_map_get_val(hctx, ZLOG_EPOCH_KEY, &bl);
+  if (ret < 0)
+    return ret;
+
+  uint64_t cur_epoch;
+  try {
+    bufferlist::iterator it = bl.begin();
+    ::decode(cur_epoch, it);
+  } catch (buffer::error& err) {
+    CLS_LOG(0, "ERROR: check_epoch(): failed to decode epoch entry");
+    return -EIO;
+  }
+
+  *pepoch = cur_epoch;
+
+  return 0;
+}
+
+static int check_epoch(cls_method_context_t hctx, uint64_t epoch)
+{
+  uint64_t cur_epoch;
+  int ret = get_epoch(hctx, &cur_epoch);
   if (ret < 0 && ret != -ENOENT) {
     CLS_LOG(10, "ERROR: check_epoch(): failed to read epoch (%d)", ret);
     return ret;
@@ -176,15 +197,6 @@ static int check_epoch(cls_method_context_t hctx, uint64_t epoch)
   if (ret == -ENOENT) {
     CLS_LOG(0, "NOTICE: treating non-init object as cur_epoch = -1");
     return 0;
-  }
-
-  uint64_t cur_epoch;
-  try {
-    bufferlist::iterator it = bl.begin();
-    ::decode(cur_epoch, it);
-  } catch (buffer::error& err) {
-    CLS_LOG(0, "ERROR: check_epoch(): failed to decode epoch entry");
-    return -EIO;
   }
 
   if (epoch <= cur_epoch) {
@@ -525,11 +537,15 @@ static int seal(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 }
 
 /*
- * TODO: Ideally max_position would be returned during seal, but given the way
- * that rados object classes work we need to split the process. Normally we
- * would seal an epoch and call this to get max position. We check the current
- * epoch in this method too, but it isn't clear what the race conditions are
- * and if they are bad. This needs a bit more thought.
+ * Ideally seal() would return the maximum position written to, but rados
+ * object classes currently prevent this because data can't be returned after
+ * an object update. Instead we enforce epoch equality, and require clients
+ * that seal() to make another pass using the same epoch.
+ *
+ * The exact semantics are that this method returns the next position in the
+ * log assuming a single object is being striped across. This is useful
+ * because 0 indicates no writes and we don't need an extra flag to describe
+ * the state of the object being empty.
  */
 static int max_position(cls_method_context_t hctx, bufferlist *in,
     bufferlist *out)
@@ -543,19 +559,28 @@ static int max_position(cls_method_context_t hctx, bufferlist *in,
     return -EINVAL;
   }
 
-  int ret = check_epoch(hctx, op.epoch);
-  if (ret) {
-    CLS_LOG(10, "NOTICE: max_position): stale epoch value");
+  uint64_t cur_epoch;
+  int ret = get_epoch(hctx, &cur_epoch);
+  if (ret < 0) {
+    CLS_LOG(0, "ERROR: max_position(): could not retrieve epoch");
     return ret;
+  }
+
+  if (op.epoch != cur_epoch) {
+    CLS_LOG(0, "ERROR: max_position(): invalid epoch");
+    return -EINVAL;
   }
 
   uint64_t position;
   ret = __max_position(hctx, &position);
-  if (ret < 0)
+  if (ret < 0 && ret != -ENOENT)
     return ret;
 
   cls_zlog_max_position_ret reply;
-  reply.position = position;
+  if (ret == -ENOENT)
+    reply.position = 0;
+  else
+    reply.position = position + 1;
 
   ::encode(reply, *out);
 
