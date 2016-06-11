@@ -18,6 +18,8 @@ namespace zlog {
     CLS_ZLOG_INVALID_EPOCH = 0x05,
   };
 
+  // version 1
+
   void cls_zlog_seal(librados::ObjectWriteOperation& op, uint64_t epoch);
 
   void cls_zlog_fill(librados::ObjectWriteOperation& op, uint64_t epoch,
@@ -34,6 +36,27 @@ namespace zlog {
 
   void cls_zlog_max_position(librados::ObjectReadOperation& op, uint64_t epoch,
       uint64_t *pposition, int *pret);
+
+  // version 2
+
+  void cls_zlog_seal_v2(librados::ObjectWriteOperation& op, uint64_t epoch);
+
+  void cls_zlog_fill_v2(librados::ObjectWriteOperation& op, uint64_t epoch,
+      uint64_t position);
+
+  void cls_zlog_write_v2(librados::ObjectWriteOperation& op, uint64_t epoch,
+      uint64_t position, ceph::bufferlist& data);
+
+  void cls_zlog_read_v2(librados::ObjectReadOperation& op, uint64_t epoch,
+      uint64_t position);
+
+  void cls_zlog_trim_v2(librados::ObjectWriteOperation& op, uint64_t epoch,
+      uint64_t position);
+
+  void cls_zlog_max_position_v2(librados::ObjectReadOperation& op, uint64_t epoch,
+      uint64_t *pposition, int *pret);
+
+  // projection management
 
   void cls_zlog_set_projection(librados::ObjectWriteOperation& op,
       uint64_t epoch, ceph::bufferlist& data);

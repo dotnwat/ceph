@@ -96,6 +96,70 @@ void cls_zlog_max_position(librados::ObjectReadOperation& op, uint64_t epoch,
   op.exec("zlog", "max_position", in, new ClsZlogMaxPositionReply(pposition, pret));
 }
 
+void cls_zlog_seal_v2(librados::ObjectWriteOperation& op, uint64_t epoch)
+{
+  bufferlist in;
+  cls_zlog_seal_op call;
+  call.epoch = epoch;
+  ::encode(call, in);
+  op.exec("zlog", "seal_v2", in);
+}
+
+void cls_zlog_fill_v2(librados::ObjectWriteOperation& op, uint64_t epoch,
+    uint64_t position)
+{
+  bufferlist in;
+  cls_zlog_fill_op call;
+  call.epoch = epoch;
+  call.position = position;
+  ::encode(call, in);
+  op.exec("zlog", "fill_v2", in);
+}
+
+void cls_zlog_write_v2(librados::ObjectWriteOperation& op, uint64_t epoch,
+    uint64_t position, ceph::bufferlist& data)
+{
+  bufferlist in;
+  cls_zlog_write_op call;
+  call.epoch = epoch;
+  call.position = position;
+  call.data = data;
+  ::encode(call, in);
+  op.exec("zlog", "write_v2", in);
+}
+
+void cls_zlog_read_v2(librados::ObjectReadOperation& op, uint64_t epoch,
+    uint64_t position)
+{
+  bufferlist in;
+  cls_zlog_read_op call;
+  call.epoch = epoch;
+  call.position = position;
+  ::encode(call, in);
+  op.exec("zlog", "read_v2", in);
+}
+
+void cls_zlog_trim_v2(librados::ObjectWriteOperation& op, uint64_t epoch,
+    uint64_t position)
+{
+  bufferlist in;
+  cls_zlog_trim_op call;
+  call.epoch = epoch;
+  call.position = position;
+  ::encode(call, in);
+  op.exec("zlog", "trim_v2", in);
+}
+
+void cls_zlog_max_position_v2(librados::ObjectReadOperation& op, uint64_t epoch,
+    uint64_t *pposition, int *pret)
+{
+  bufferlist in;
+  cls_zlog_max_position_op call;
+  call.epoch = epoch;
+  ::encode(call, in);
+  op.exec("zlog", "max_position_v2", in, new ClsZlogMaxPositionReply(pposition, pret));
+}
+
 void cls_zlog_set_projection(librados::ObjectWriteOperation& op,
     uint64_t epoch, ceph::bufferlist& data)
 {
