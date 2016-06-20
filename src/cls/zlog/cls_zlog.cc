@@ -76,7 +76,18 @@ WRITE_CLASS_ENCODER(cls_zlog_log_entry)
  *  - trim can garbage collect data, but it isn't clear how to do that with
  *    object data yet. for now we don't free the space.
  *  - add cls_cxx_append function upstream
+ *
+ * Large Object Handling
+ *
+ * When an object becomes too large a new stripe needs to be created.  Each
+ * object has a configurable maximum size imposed by Ceph (by default it is
+ * 100 GB). When a maximum is hit -EFBIG is returned. We also want to be able
+ * to enforce our own size limits, and currently a signed integer is used to
+ * encode offsets so there are various limits. In each of these cases we will
+ * return -EFBIG and select a reasonable maximum object size that won't reach
+ * the offset limits of a 31 bits.
  */
+#define MAX_OBJECT_SIZE 1073741824 // 1 GB
 struct cls_zlog_log_entry_v2 {
   int flags;
   uint64_t offset;
@@ -773,6 +784,11 @@ static int write_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
     if (ret == -ENOENT)
       object_size = 0;
+
+    if ((object_size + op.data.length()) > MAX_OBJECT_SIZE) {
+      CLS_LOG(10, "NOTICE: write_v2(): maximum object size reached");
+      return -EFBIG;
+    }
 
     // append entry data to object
     ret = cls_cxx_write(hctx, object_size, op.data.length(), &op.data);
