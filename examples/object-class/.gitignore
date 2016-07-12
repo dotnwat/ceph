@@ -1,0 +1,5 @@
+CMakeCache.txt
+CMakeFiles/
+Makefile
+cmake_install.cmake
+libcls_ext_test.so*
