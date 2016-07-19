@@ -34,7 +34,7 @@
 #include <sstream>
 #include <errno.h>
 
-#include "../../src/objclass/objclass-public.h"
+#include <rados/objclass-public.h>
 
 CLS_VER(1,0)
 CLS_NAME(hello)

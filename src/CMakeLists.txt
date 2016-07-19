@@ -575,6 +575,7 @@ install(FILES include/rados/librados.h
   include/memory.h
   include/page.h
   include/crc32c.h
+  objclass/objclass-public.h
   DESTINATION include/rados)
 install(TARGETS librados DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
