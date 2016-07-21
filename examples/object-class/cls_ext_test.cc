@@ -120,11 +120,21 @@ static int record_hello(cls_method_context_t hctx, bufferlist *in, bufferlist *o
 
   // entity_inst_t requires msg/msg_types.h
   //entity_inst_t origin;
-  //cls_get_request_origin(hctx, &origin);
-  std::ostringstream ss;
-  //ss << origin;
+  //std::ostringstream ss;
+
+  entity_origin_ptr_t origin;
+  cls_get_request_origin2(hctx, &origin);
+  std::string value;
+  cls_serialize(origin, &value);
   bufferlist attrbl;
-  attrbl.append(ss.str());
+  attrbl.append(value);
+  free(origin);
+
+  //cls_get_request_origin(hctx, &origin);
+  //std::ostringstream ss;
+  //ss << origin;
+  //bufferlist attrbl;
+  //attrbl.append(ss.str());
   r = cls_cxx_setxattr(hctx, "said_by", &attrbl);
   if (r < 0)
     return r;
@@ -159,8 +169,7 @@ static int writes_dont_return_data(cls_method_context_t hctx, bufferlist *in, bu
     // note that if we return anything < 0 (an error), this
     // operation/transaction will abort, and the setattr above will
     // never happen.  however, we *can* return data on error.
-    out->append("too much input data!");
-    return -EINVAL;
+
   }
 
   // try to return some data.  note that this *won't* reach the
@@ -290,9 +299,9 @@ public:
 };
 
 
-PGLSFilter *hello_filter()
+PGLSFilter *hello_filter() //*ext_test_filter()
 {
-  return new PGLSHelloFilter();
+  return new PGLSHelloFilter(); //return PGLSExtTestFilter();
 }
 #endif
 
@@ -346,6 +355,7 @@ void __cls_init()
 
 #if 0
   // A PGLS filter
+  // cls_register_cxx_filter(h_class, "ext_test", ext_test_filter);
   cls_register_cxx_filter(h_class, "hello", hello_filter);
 #endif
 }

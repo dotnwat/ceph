@@ -44,6 +44,8 @@ typedef void *cls_method_context_t;
 typedef int (*cls_method_call_t)(cls_method_context_t ctx,
 				 char *indata, int datalen,
 				 char **outdata, int *outdatalen);
+typedef void* entity_origin_ptr_t;// to be removed
+
 typedef struct {
 	const char *name;
 	const char *ver;
@@ -54,6 +56,12 @@ extern int cls_log(int level, const char *format, ...)
   __attribute__((__format__(printf, 2, 3)));
 extern void *cls_alloc(size_t size);
 extern void cls_free(void *p);
+
+// to be removed
+extern int cls_get_request_origin2(cls_method_context_t hctx,
+     entity_origin_ptr_t *origin);
+extern int cls_serialize(entity_origin_ptr_t origin,
+    std::string *origin_string);
 
 extern int cls_read(cls_method_context_t hctx, int ofs, int len,
                                  char **outdata, int *outdatalen);

@@ -713,3 +713,25 @@ int cls_log(int level, const char *format, ...)
      size *= 2;
    }
 }
+
+int cls_get_request_origin2(cls_method_context_t hctx,
+                            entity_origin_ptr_t *origin)
+{
+  *origin = malloc(sizeof(entity_inst_t));
+  if (!*origin)
+    return -ENOMEM;
+  ReplicatedPG::OpContext **pctx = 
+    static_cast<ReplicatedPG::OpContext **>(hctx);
+  entity_inst_t *local_origin = (entity_inst_t *)*origin;
+  *local_origin = (*pctx)->op->get_req()->get_orig_source_inst();
+  return 0;
+}
+
+int cls_serialize(entity_origin_ptr_t origin, std::string *origin_string)
+{
+  std::ostringstream ss;
+  ss << *(entity_inst_t *)origin;
+  // extracting entire origin into a string 
+  *origin_string = ss.str();
+  return 0;
+}
