@@ -1013,7 +1013,7 @@ int cls_cxx_create(cls_method_context_t hctx, bool exclusive) {
   return ctx->io_ctx_impl->create(ctx->oid, exclusive);
 }
 
-int cls_get_request_origin(cls_method_context_t hctx, entity_inst_t *origin) {
+int cls_get_request_origin(cls_method_context_t hctx, void *origin) {
   //TODO
   return 0;
 }

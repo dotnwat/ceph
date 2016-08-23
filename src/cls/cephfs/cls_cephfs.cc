@@ -17,7 +17,8 @@
 #include <errno.h>
 #include <sstream>
 
-#include "objclass/objclass.h"
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
 
 #include "cls_cephfs.h"
 
@@ -127,6 +128,7 @@ static int accumulate_inode_metadata(cls_method_context_t hctx,
 // and an xattr (scrub_tag) not equal to a specific value.
 // This is so special case that we can't really pretend it's
 // generic, so just fess up and call this the cephfs filter.
+/*
 class PGLSCephFSFilter : public PGLSFilter {
 protected:
   std::string scrub_tag;
@@ -188,7 +190,7 @@ PGLSFilter *inode_tag_filter()
 {
   return new PGLSCephFSFilter();
 }
-
+*/
 /**
  * initialize class
  *
@@ -207,6 +209,6 @@ void __cls_init()
 			  accumulate_inode_metadata, &h_accumulate_inode_metadata);
 
   // A PGLS filter
-  cls_register_cxx_filter(h_class, "inode_tag", inode_tag_filter);
+  //cls_register_cxx_filter(h_class, "inode_tag", inode_tag_filter);
 }
 

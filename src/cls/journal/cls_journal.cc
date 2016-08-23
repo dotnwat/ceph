@@ -5,7 +5,10 @@
 #include "include/buffer.h"
 #include "include/encoding.h"
 #include "common/errno.h"
-#include "objclass/objclass.h"
+
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
+
 #include "cls/journal/cls_journal_types.h"
 #include <errno.h>
 #include <map>

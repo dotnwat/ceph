@@ -9,7 +9,9 @@
  * Copyright Inktank 2013
  */
 
-#include "objclass/objclass.h"
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
+
 #include "global/global_context.h"
 
 #include "cls_replica_log_types.h"

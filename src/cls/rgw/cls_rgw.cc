@@ -10,7 +10,10 @@
 #include <errno.h>
 
 #include "common/ceph_time.h"
-#include "objclass/objclass.h"
+
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
+
 #include "cls/rgw/cls_rgw_ops.h"
 #include "common/Clock.h"
 #include "common/strtol.h"

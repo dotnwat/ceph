@@ -9,7 +9,9 @@
 
 #include "include/types.h"
 #include "include/utime.h"
-#include "objclass/objclass.h"
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
+
 #include "cls/refcount/cls_refcount_ops.h"
 #include "common/Clock.h"
 

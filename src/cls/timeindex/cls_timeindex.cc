@@ -9,7 +9,8 @@
 
 #include "include/types.h"
 #include "include/utime.h"
-#include "objclass/objclass.h"
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
 
 #include "cls_timeindex_types.h"
 #include "cls_timeindex_ops.h"

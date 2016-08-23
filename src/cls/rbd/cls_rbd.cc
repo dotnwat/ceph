@@ -39,7 +39,10 @@
 
 #include "common/bit_vector.hpp"
 #include "common/errno.h"
-#include "objclass/objclass.h"
+
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
+
 #include "osd/osd_types.h"
 #include "include/rbd_types.h"
 #include "include/rbd/object_map_types.h"
@@ -3291,7 +3294,6 @@ int image_status_set(cls_method_context_t hctx, const string &global_image_id,
   MirrorImageStatusOnDisk ondisk_status(status);
   ondisk_status.up = false;
   ondisk_status.last_update = ceph_clock_now(g_ceph_context);
-
   int r = cls_get_request_origin(hctx, &ondisk_status.origin);
   assert(r == 0);
 

@@ -11,8 +11,14 @@ else()
 endif()
 
 include_directories(../../src/include)
-#LINK_DIRECTORIES(~/new/ceph/build/lib)
 
+# This is based on cls_hello. cls_ext_test does not provide support for PGLSFilter.
+# cls_ext_test
 add_library(cls_ext_test SHARED cls_ext_test.cc)
-
 set_target_properties(cls_ext_test PROPERTIES VERSION "1.0.0" SOVERSION "1")
+
+# cls_hello does not provide support for PGLSFilter.
+# cls_hello
+add_library(cls_hello SHARED hello/cls_hello.cc)
+set_target_properties(cls_hello PROPERTIES VERSION "1.0.0" SOVERSION "1")
+
