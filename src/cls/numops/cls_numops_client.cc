@@ -12,7 +12,8 @@
  *
  */
 
-#include "objclass/objclass.h"
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
 #include "cls/numops/cls_numops_client.h"
 #include "include/encoding.h"
 

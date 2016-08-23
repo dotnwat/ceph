@@ -29,12 +29,23 @@
  * include/buffer.h (and implemented in common/buffer.cc).
  */
 
+/*
+ * This is an example of an object class built outside the Ceph src tree.
+ * It is based on cls_hello. It uses objclass-public.h, which is the
+ * public interface of object classes. 
+ *
+ * TODO: Provide support for PGLSFilter in objclass-public.h.
+ */
+
 #include <algorithm>
 #include <string>
 #include <sstream>
 #include <errno.h>
 
-#include <rados/objclass-public.h>
+//#include <rados/objclass-public.h>
+#include "../../src/objclass/objclass-public.h"
+
+using namespace std;
 
 CLS_VER(1,0)
 CLS_NAME(hello)
@@ -118,9 +129,9 @@ static int record_hello(cls_method_context_t hctx, bufferlist *in, bufferlist *o
 
   // also make note of who said it
 
-  // entity_inst_t requires msg/msg_types.h
-  //entity_inst_t origin;
-  //std::ostringstream ss;
+  // Use entity_origin_ptr_t in place of entity_inst_t origin to build outside 
+  // the Ceph src the tree. Use cls_get_request_origin2 and cls_seriliaze 
+  // instead of cls_get_request_origin.
 
   entity_origin_ptr_t origin;
   cls_get_request_origin2(hctx, &origin);
@@ -130,11 +141,6 @@ static int record_hello(cls_method_context_t hctx, bufferlist *in, bufferlist *o
   attrbl.append(value);
   free(origin);
 
-  //cls_get_request_origin(hctx, &origin);
-  //std::ostringstream ss;
-  //ss << origin;
-  //bufferlist attrbl;
-  //attrbl.append(ss.str());
   r = cls_cxx_setxattr(hctx, "said_by", &attrbl);
   if (r < 0)
     return r;
@@ -235,12 +241,18 @@ static int turn_it_to_11(cls_method_context_t hctx, bufferlist *in, bufferlist *
 
   // record who did it
   
-  //entity_inst_t origin;
-  //cls_get_request_origin(hctx, &origin);
-  std::ostringstream ss;
-  //ss << origin;
+  // Use entity_origin_ptr_t instead of entity_inst_t origin to build outside 
+  // the Ceph src tree. Use cls_get_request_origin2 and cls_serialize instead of 
+  // cls_get_request_origin.
+
+  entity_origin_ptr_t origin;
+  cls_get_request_origin2(hctx, &origin);
+  std::string value;
+  cls_serialize(origin, &value);
   bufferlist attrbl;
-  attrbl.append(ss.str());
+  attrbl.append(value);
+  free(origin);
+
   r = cls_cxx_setxattr(hctx, "amplified_by", &attrbl);
   if (r < 0)
     return r;
@@ -269,9 +281,10 @@ static int bad_writer(cls_method_context_t hctx, bufferlist *in, bufferlist *out
   return cls_cxx_write_full(hctx, in);
 }
 
+// TODO: PGLSFilter support in objclass-public.h.
 
-#if 0
-class PGLSHelloFilter : public PGLSFilter {
+/*
+class PGLSExtTestFilter : public PGLSFilter {
   string val;
 public:
   int init(bufferlist::iterator& params) {
@@ -284,8 +297,9 @@ public:
     return 0;
   }
 
-  virtual ~PGLSHelloFilter() {}
-  virtual bool filter(const hobject_t &obj, bufferlist& xattr_data,
+  virtual ~PGLSExtTestFilter() {}
+  // cls_hobject_t instead of const hobject_t &obj to hide implementation of hobject.
+  virtual bool filter(cls_hobject_t obj, bufferlist& xattr_data,
                       bufferlist& outdata)
   {
     if (val.size() != xattr_data.length())
@@ -299,12 +313,11 @@ public:
 };
 
 
-PGLSFilter *hello_filter() //*ext_test_filter()
-{
-  return new PGLSHelloFilter(); //return PGLSExtTestFilter();
+PGLSFilter *ext_test_filter()
+{ 
+  return new PGLSExtTestFilter();
 }
-#endif
-
+*/
 
 /**
  * initialize class
@@ -353,9 +366,7 @@ void __cls_init()
   cls_register_cxx_method(h_class, "bad_writer", CLS_METHOD_RD,
 			  bad_writer, &h_bad_writer);
 
-#if 0
-  // A PGLS filter
-  // cls_register_cxx_filter(h_class, "ext_test", ext_test_filter);
-  cls_register_cxx_filter(h_class, "hello", hello_filter);
-#endif
+
+  // This function is present in objclass.h.
+  //cls_register_cxx_filter(h_class, "ext_test", ext_test_filter);
 }

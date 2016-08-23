@@ -197,8 +197,10 @@ int cls_read(cls_method_context_t hctx, int ofs, int len,
   return *outdatalen;
 }
 
-int cls_get_request_origin(cls_method_context_t hctx, entity_inst_t *origin)
+// changing entity_inst_t *origin to void *void_origin 
+int cls_get_request_origin(cls_method_context_t hctx, void *void_origin)
 {
+  entity_inst_t *origin = (entity_inst_t *)void_origin;
   ReplicatedPG::OpContext **pctx = static_cast<ReplicatedPG::OpContext **>(hctx);
   *origin = (*pctx)->op->get_req()->get_orig_source_inst();
   return 0;
@@ -246,7 +248,8 @@ int cls_cxx_stat(cls_method_context_t hctx, uint64_t *size, time_t *mtime)
   return 0;
 }
 
-int cls_cxx_stat2(cls_method_context_t hctx, uint64_t *size, ceph::real_time *mtime)
+// changing ceph::real_time *mtime to void *time.
+int cls_cxx_stat2(cls_method_context_t hctx, uint64_t *size, void *time)
 {
   ReplicatedPG::OpContext **pctx = (ReplicatedPG::OpContext **)hctx;
   vector<OSDOp> ops(1);
@@ -264,6 +267,8 @@ int cls_cxx_stat2(cls_method_context_t hctx, uint64_t *size, ceph::real_time *mt
   } catch (buffer::error& err) {
     return -EIO;
   }
+  
+  ceph::real_time *mtime = (ceph::real_time*) time;
   if (size)
     *size = s;
   if (mtime)

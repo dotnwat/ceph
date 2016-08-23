@@ -19,7 +19,8 @@
 
 #include "include/types.h"
 #include "include/utime.h"
-#include "objclass/objclass.h"
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
 
 #include "common/errno.h"
 #include "common/Clock.h"
