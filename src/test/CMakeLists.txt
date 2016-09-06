@@ -5,6 +5,7 @@ set(UNITTEST_CXX_FLAGS "-I${CMAKE_SOURCE_DIR}/src/googletest/googlemock/include 
 
 add_subdirectory(bench)
 add_subdirectory(cls_hello)
+add_subdirectory(cls_sdk)
 add_subdirectory(cls_lock)
 add_subdirectory(cls_log)
 add_subdirectory(cls_numops)
