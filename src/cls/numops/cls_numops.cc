@@ -19,7 +19,10 @@
  *
  */
 
-#include "objclass/objclass.h"
+//#include <rados/objclass-public.h>
+#include "../objclass/objclass-public.h"
+#include <include/encoding.h>
+
 #include <errno.h>
 #include <iostream>
 #include <map>

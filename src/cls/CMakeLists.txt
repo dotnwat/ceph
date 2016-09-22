@@ -2,10 +2,13 @@
 
 set(cls_dir ${CMAKE_INSTALL_LIBDIR}/rados-classes)
 
+# cls_hello is used as an example to be built outside the tree.
+if(FALSE)
 # cls_hello
 add_library(cls_hello SHARED hello/cls_hello.cc)
 set_target_properties(cls_hello PROPERTIES VERSION "1.0.0" SOVERSION "1")
 install(TARGETS cls_hello DESTINATION ${cls_dir})
+endif()
 
 # cls_numops
 add_library(cls_numops SHARED numops/cls_numops.cc)
