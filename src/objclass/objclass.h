@@ -11,6 +11,23 @@
 
 #include "include/rados/objclass.h"
 
+extern void *cls_alloc(size_t size);
+extern void cls_free(void *p);
+
+extern int cls_read(cls_method_context_t hctx, int ofs, int len,
+                                 char **outdata, int *outdatalen);
+extern int cls_call(cls_method_context_t hctx, const char *cls, const char *method,
+                                 char *indata, int datalen,
+                                 char **outdata, int *outdatalen);
+extern int cls_getxattr(cls_method_context_t hctx, const char *name,
+                                 char **outdata, int *outdatalen);
+extern int cls_setxattr(cls_method_context_t hctx, const char *name,
+                                 const char *value, int val_len);
+/** This will fill in the passed origin pointer with the origin of the
+ * request which activated your class call. */
+extern int cls_get_request_origin(cls_method_context_t hctx,
+                                  entity_inst_t *origin);
+
 class PGLSFilter {
 protected:
   string xattr;
