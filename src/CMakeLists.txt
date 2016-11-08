@@ -554,6 +554,8 @@ add_subdirectory(global)
 
 add_subdirectory(lua)
 
+add_subdirectory(phydesign)
+
 # rados object classes
 add_subdirectory(cls)
 

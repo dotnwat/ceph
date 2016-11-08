@@ -150,3 +150,7 @@ target_link_libraries(cls_lua
 add_library(cls_lua_client STATIC
     lua/cls_lua_client.cc
 )
+
+add_library(cls_phydesign SHARED phydesign/cls_phydesign.cc)
+set_target_properties(cls_phydesign PROPERTIES VERSION "1.0.0" SOVERSION "1")
+install(TARGETS cls_phydesign DESTINATION ${cls_dir})
