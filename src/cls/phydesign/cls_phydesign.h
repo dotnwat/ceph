@@ -9,4 +9,9 @@
 #define READ_EPOCH_NOOP         5
 #define READ_EPOCH_HEADER       6
 
+#define READ_OMAP_INDEX_ENTRY   7
+#define WRITE_OMAP_INDEX_ENTRY  8
+
+#define APPEND_DATA             9
+
 #endif

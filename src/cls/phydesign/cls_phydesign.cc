@@ -11,6 +11,43 @@ CLS_NAME(phydesign)
 cls_handle_t h_class;
 cls_method_handle_t h_zlog;
 
+/*
+ * metadata/index entry for when the log entry data is stored in the
+ * bytestream. it records state (e.g. filled, trimmed, etc...) and the
+ * location and size of the entry.
+ */
+struct entry {
+  int flags;
+  uint64_t offset;
+  uint64_t length;
+
+  entry() {}
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    ::encode(flags, bl);
+    ::encode(offset, bl);
+    ::encode(length, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(bufferlist::iterator& bl) {
+    DECODE_START(1, bl);
+    ::decode(flags, bl);
+    ::decode(offset, bl);
+    ::decode(length, bl);
+    DECODE_FINISH(bl);
+  }
+};
+WRITE_CLASS_ENCODER(entry)
+
+static inline std::string u64tostr(uint64_t value)
+{
+  std::stringstream ss;
+  ss << "pos." << std::setw(20) << std::setfill('0') << value;
+  return ss.str();
+}
+
 static std::string ops_to_string(const std::vector<int>& ops)
 {
   std::stringstream ss;
@@ -18,9 +55,12 @@ static std::string ops_to_string(const std::vector<int>& ops)
   for (std::vector<int>::const_iterator it = ops.begin();
        it != ops.end(); it++) {
     switch (*it) {
+
       case INIT_STATE:
         ss << "init_state";
         break;
+
+
       case READ_EPOCH_OMAP:
         ss << "read_epoch_omap";
         break;
@@ -36,6 +76,18 @@ static std::string ops_to_string(const std::vector<int>& ops)
       case READ_EPOCH_HEADER:
         ss << "read_epoch_header";
         break;
+
+      case READ_OMAP_INDEX_ENTRY:
+        ss << "read_omap_index_entry";
+        break;
+      case WRITE_OMAP_INDEX_ENTRY:
+        ss << "write_omap_index_entry";
+        break;
+
+      case APPEND_DATA:
+        ss << "append_data";
+        break;
+
       default:
         ss << "unknown";
         break;
@@ -50,18 +102,24 @@ static int zlog(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   std::vector<int> ops;
   uint64_t position;
+  bufferlist entry_blob;
 
   try {
     bufferlist::iterator it = in->begin();
     ::decode(ops, it);
     ::decode(position, it);
+    ::decode(entry_blob, it);
   } catch (const buffer::error &err) {
     CLS_ERR("ERROR: decoding zlog ops");
     return -EINVAL;
   }
 
+#if 0
   std::string op_str = ops_to_string(ops);
   CLS_LOG(0, "ops: %s", op_str.c_str());
+  CLS_LOG(0, "pos: %d", (int)position);
+  CLS_LOG(0, "len: %d", (int)entry_blob.length());
+#endif
 
   for (std::vector<int>::const_iterator it = ops.begin();
        it != ops.end(); it++) {
@@ -158,6 +216,49 @@ static int zlog(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
           int ret = cls_cxx_read(hctx, 0, sizeof(epoch), &bl);
           if (ret < 0) {
             CLS_ERR("ERROR: READ_EPOCH_XATTR/getxattr %d", ret);
+            return ret;
+          }
+        }
+        break;
+
+      case READ_OMAP_INDEX_ENTRY:
+        {
+          bufferlist bl;
+          const std::string key = u64tostr(position);
+          int ret = cls_cxx_map_get_val(hctx, key, &bl);
+          if (ret < 0 && ret != -ENOENT) {
+            CLS_ERR("ERROR: READ_OMAP_INDEX_ENTRY/getval %d", ret);
+            return ret;
+          }
+        }
+        break;
+
+      case WRITE_OMAP_INDEX_ENTRY:
+        {
+          struct entry e;
+          bufferlist bl;
+          ::encode(e, bl);
+          const std::string key = u64tostr(position);
+          int ret = cls_cxx_map_set_val(hctx, key, &bl);
+          if (ret < 0) {
+            CLS_ERR("ERROR: WRITE_OMAP_INDEX_ENTRY/setval %d", ret);
+            return ret;
+          }
+        }
+        break;
+
+      case APPEND_DATA:
+        {
+          uint64_t size;
+          int ret = cls_cxx_stat(hctx, &size, NULL);
+          if (ret < 0) {
+            CLS_ERR("ERROR: APPEND_DATA/stat %d", ret);
+            return ret;
+          }
+
+          ret = cls_cxx_write(hctx, size, entry_blob.length(), &entry_blob);
+          if (ret < 0) {
+            CLS_ERR("ERROR: APPEND_DATA/write %d", ret);
             return ret;
           }
         }
