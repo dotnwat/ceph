@@ -1,7 +1,13 @@
 #include <iostream>
+#include <vector>
+#include <thread>
+#include <mutex>
 #include <sstream>
 #include <fstream>
 #include <boost/program_options.hpp>
+#include <boost/uuid/uuid.hpp>
+#include <boost/uuid/uuid_generators.hpp>
+#include <boost/uuid/uuid_io.hpp>
 #include "include/rados/librados.hpp"
 
 namespace po = boost::program_options;
@@ -56,17 +62,155 @@ static void do_gendata(librados::IoCtx& ioctx,
   fflush(stdout);
 }
 
+static void get_source_objects(librados::IoCtx& ioctx,
+    std::vector<std::string>& oids)
+{
+  int total_objs = 0;
+  int total_src_objs = 0;
+  const std::string prefix = "copyfrom.src.";
+
+  std::vector<std::string> out;
+  for (auto it = ioctx.nobjects_begin(); it != ioctx.nobjects_end(); it++) {
+    const std::string oid = it->get_oid();
+    auto mm = std::mismatch(prefix.begin(), prefix.end(), oid.begin());
+    if (mm.first == prefix.end()) {
+      out.push_back(oid);
+      total_src_objs++;
+    }
+    total_objs++;
+    std::cout << "searching for source objects... " <<
+      total_src_objs << "/" << total_objs << "\r";
+  }
+  std::cout << std::endl;
+
+  oids.swap(out);
+}
+
+static void naive_copy_worker(int i, librados::IoCtx *ioctx,
+    std::vector<std::string> *oids, std::mutex *lock)
+{
+  boost::uuids::uuid uuid = boost::uuids::random_generator()();
+
+  for (;;) {
+    lock->lock();
+    if (oids->empty()) {
+      lock->unlock();
+      break;
+    }
+
+    // src oid
+    std::string src_oid = oids->back();
+    oids->pop_back();
+    lock->unlock();
+
+    // dst oid
+    std::stringstream dst_ss;
+    dst_ss << "copyfrom.dst." << uuid << "." << src_oid;
+    std::string dst_oid = dst_ss.str();
+
+    ceph::bufferlist bl;
+    int ret = ioctx->read(src_oid, bl, 0, 0);
+    assert(ret > 0);
+    assert(bl.length() > 0);
+
+    ret = ioctx->stat(dst_oid, NULL, NULL);
+    assert(ret == -ENOENT);
+
+    ret = ioctx->write_full(dst_oid, bl);
+    assert(ret == 0);
+  }
+}
+
+static void do_naive_copy(librados::IoCtx& ioctx, int qdepth)
+{
+  // get a list of objects to copy
+  std::vector<std::string> src_oids;
+  get_source_objects(ioctx, src_oids);
+
+  std::mutex lock;
+
+  std::vector<std::thread> workers;
+  for (int i = 0; i < qdepth; i++) {
+    workers.push_back(std::thread(naive_copy_worker, i, &ioctx,
+          &src_oids, &lock));
+  }
+
+  std::for_each(workers.begin(), workers.end(),
+      [](std::thread& t) { t.join(); });
+}
+
+static void server_copy_worker(int i, librados::IoCtx *ioctx,
+    std::vector<std::string> *oids, std::mutex *lock)
+{
+  boost::uuids::uuid uuid = boost::uuids::random_generator()();
+
+  for (;;) {
+    lock->lock();
+    if (oids->empty()) {
+      lock->unlock();
+      break;
+    }
+
+    // src oid
+    std::string src_oid = oids->back();
+    oids->pop_back();
+    lock->unlock();
+
+    // dst oid
+    std::stringstream dst_ss;
+    dst_ss << "copyfrom.dst." << uuid << "." << src_oid;
+    std::string dst_oid = dst_ss.str();
+
+    int ret = ioctx->stat(dst_oid, NULL, NULL);
+    assert(ret == -ENOENT);
+
+    uint64_t ver = ioctx->get_last_version();
+
+    librados::ObjectWriteOperation op;
+    op.copy_from(src_oid, *ioctx, ver);
+
+    ret = ioctx->operate(dst_oid, &op);
+    assert(ret == 0);
+  }
+}
+
+static void do_server_copy(librados::IoCtx& ioctx, int qdepth)
+{
+  // get a list of objects to copy
+  std::vector<std::string> src_oids;
+  get_source_objects(ioctx, src_oids);
+
+  std::mutex lock;
+
+  std::vector<std::thread> workers;
+  for (int i = 0; i < qdepth; i++) {
+    workers.push_back(std::thread(server_copy_worker, i, &ioctx,
+          &src_oids, &lock));
+  }
+
+  std::for_each(workers.begin(), workers.end(),
+      [](std::thread& t) { t.join(); });
+}
+
 int main(int argc, char **argv)
 {
   size_t num_objs;
   size_t obj_size;
   std::string pool;
   bool gendata;
+  int qdepth;
+  std::string copymode;
 
   po::options_description gen_opts("General options");
   gen_opts.add_options()
     ("help,h", "show help message")
     ("pool", po::value<std::string>(&pool)->required(), "rados pool")
+  ;
+
+  po::options_description copy_opts("Copy workload options");
+  copy_opts.add_options()
+    ("copy-mode", po::value<std::string>(&copymode)->default_value(""), "copy mode")
+    ("qdepth", po::value<int>(&qdepth)->default_value(1), "queue depth")
   ;
 
   po::options_description datagen_opts("Source data generator options");
@@ -77,7 +221,7 @@ int main(int argc, char **argv)
   ;
 
   po::options_description all_opts("Allowed options");
-  all_opts.add(gen_opts).add(datagen_opts);
+  all_opts.add(gen_opts).add(datagen_opts).add(copy_opts);
 
   po::variables_map vm;
   po::store(po::parse_command_line(argc, argv, all_opts), vm);
@@ -103,7 +247,14 @@ int main(int argc, char **argv)
 
   if (gendata) {
     do_gendata(ioctx, num_objs, obj_size);
+  } else if (copymode == "naive") {
+    do_naive_copy(ioctx, qdepth);
+  } else if (copymode == "server") {
+    do_server_copy(ioctx, qdepth);
   }
+
+  ioctx.close();
+  cluster.shutdown();
 
   return 0;
 }
