@@ -206,6 +206,7 @@ int main(int argc, char **argv)
   gen_opts.add_options()
     ("help,h", "show help message")
     ("pool", po::value<std::string>(&pool)->required(), "rados pool")
+    ("num-objs", po::value<size_t>(&num_objs)->default_value(1), "number of objects")
   ;
 
   po::options_description copy_opts("Copy workload options");
@@ -218,7 +219,6 @@ int main(int argc, char **argv)
   po::options_description datagen_opts("Source data generator options");
   datagen_opts.add_options()
     ("gendata", po::bool_switch(&gendata)->default_value(false), "generate source data")
-    ("num-objs", po::value<size_t>(&num_objs)->default_value(1), "number of objects")
     ("obj-size", po::value<size_t>(&obj_size)->default_value(1), "size of each object")
   ;
 
