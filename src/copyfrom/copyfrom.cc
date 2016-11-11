@@ -206,7 +206,7 @@ int main(int argc, char **argv)
   gen_opts.add_options()
     ("help,h", "show help message")
     ("pool", po::value<std::string>(&pool)->required(), "rados pool")
-    ("num-objs", po::value<size_t>(&num_objs)->default_value(1), "number of objects")
+    ("num-objs", po::value<size_t>(&num_objs)->default_value(0), "number of objects")
   ;
 
   po::options_description copy_opts("Copy workload options");
@@ -234,6 +234,25 @@ int main(int argc, char **argv)
   }
 
   po::notify(vm);
+
+  if (copy_client && copy_server) {
+    std::cerr << "copy modes are exclusive" << std::endl;
+    exit(1);
+  }
+
+  bool copy_mode = copy_client || copy_server;
+
+  if (copy_mode || gendata) {
+    if (num_objs <= 0) {
+      std::cerr << "--num-objs required" << std::endl;
+      exit(1);
+    }
+  }
+
+  if (!copy_mode && !gendata) {
+    std::cerr << "no workload mode specified" << std::endl;
+    exit(1);
+  }
 
   // connect to rados
   librados::Rados cluster;
