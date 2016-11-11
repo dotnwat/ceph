@@ -199,7 +199,8 @@ int main(int argc, char **argv)
   std::string pool;
   bool gendata;
   int qdepth;
-  std::string copymode;
+  bool copy_client;
+  bool copy_server;
 
   po::options_description gen_opts("General options");
   gen_opts.add_options()
@@ -209,7 +210,8 @@ int main(int argc, char **argv)
 
   po::options_description copy_opts("Copy workload options");
   copy_opts.add_options()
-    ("copy-mode", po::value<std::string>(&copymode)->default_value(""), "copy mode")
+    ("copy-client", po::bool_switch(&copy_client)->default_value(false), "client copy mode")
+    ("copy-server", po::bool_switch(&copy_server)->default_value(false), "server copy mode")
     ("qdepth", po::value<int>(&qdepth)->default_value(1), "queue depth")
   ;
 
@@ -247,9 +249,9 @@ int main(int argc, char **argv)
 
   if (gendata) {
     do_gendata(ioctx, num_objs, obj_size);
-  } else if (copymode == "naive") {
+  } else if (copy_client) {
     do_naive_copy(ioctx, qdepth);
-  } else if (copymode == "server") {
+  } else if (copy_server) {
     do_server_copy(ioctx, qdepth);
   }
 
