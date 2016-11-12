@@ -228,7 +228,10 @@ class CopyWorkload {
       sleep(1);
 
       time_t dur = time(NULL) - start;
-      unsigned completed = oid_index_ + 1;
+      // oid_index_ can go above num_objs_ but the threads that cause that
+      // bump notice the job is completed and exit. we cap here just to make
+      // the status output make sense.
+      unsigned completed = std::min(oid_index_ + 1, (unsigned int)num_objs_);
       double rate = (double)completed / (double)dur;
       int est = (double)(num_objs_ - completed) / rate;
       est = std::max(0, est);
