@@ -3,14 +3,24 @@
 #include <thread>
 #include <atomic>
 #include <sstream>
+#include <mutex>
 #include <fstream>
 #include <boost/program_options.hpp>
 #include <boost/uuid/uuid.hpp>
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
+#include <fcntl.h>
 #include "include/rados/librados.hpp"
 
 namespace po = boost::program_options;
+
+static inline uint64_t getns()
+{
+  struct timespec ts;
+  int ret = clock_gettime(CLOCK_MONOTONIC, &ts);
+  assert(ret == 0);
+  return (((uint64_t)ts.tv_sec) * 1000000000ULL) + ts.tv_nsec;
+}
 
 class SourceManager {
  public:
@@ -55,47 +65,56 @@ class SourceManager {
 
       std::cout << "writing object "
         << ++count << "/" << total << ": "
-        << oid << "\r" << std::flush;
+        << oid.first << "\r" << std::flush;
 
-      int ret = ioctx_->remove(oid);
+      int ret = ioctx_->remove(oid.first);
       assert(ret == 0 || ret == -ENOENT);
 
-      ret = ioctx_->write_full(oid, bl);
+      ret = ioctx_->write_full(oid.first, bl);
       assert(ret == 0);
     }
 
     std::cout << std::endl;
   }
 
-  std::vector<std::string> src_oids() {
-    std::vector<std::string> oids;
-    for (int i = 0; i < num_objs_; i++) {
-      oids.push_back(make_oid(i));
-    }
-    return oids;
+  std::vector<std::pair<std::string, size_t>> src_oids(size_t want_size) {
+    return src_oids(want_size, true);
   }
 
-  void verify_src_oids(const std::vector<std::string>& oids,
-      const size_t want_size) {
-
-    assert(!oids.empty());
-
-    std::cout << "verifying " << oids.size()
-      << " objects (size=" << want_size
-      << ")... " << std::flush;
-
-    // check that all objects have the same size
-    for (const auto oid : oids) {
-      size_t this_size;
-      int ret = ioctx_->stat(oid, &this_size, NULL);
-      assert(ret == 0);
-      assert(this_size == want_size);
-    }
-
-    std::cout << "completed!" << std::endl << std::flush;
+  std::vector<std::pair<std::string, size_t>> src_oids() {
+    return src_oids(0, false);
   }
 
  private:
+  std::vector<std::pair<std::string, size_t>> src_oids(size_t want_size,
+      bool verify) {
+
+    assert(num_objs_ > 0);
+
+    if (verify) {
+      std::cout << "verifying " << num_objs_
+        << " objects (size=" << want_size
+        << ")... " << std::flush;
+    }
+
+    std::vector<std::pair<std::string, size_t>> oids;
+    for (int i = 0; i < num_objs_; i++) {
+      size_t size = 0;
+      const std::string oid = make_oid(i);
+      if (verify) {
+        int ret = ioctx_->stat(oid, &size, NULL);
+        assert(ret == 0);
+        assert(size == want_size);
+      }
+      oids.push_back(std::make_pair(oid, size));
+    }
+
+    if (verify)
+      std::cout << "completed!" << std::endl << std::flush;
+
+    return oids;
+  }
+
   std::string make_oid(int i) {
     std::stringstream ss;
     ss << "copyfrom.src." << i;
@@ -110,17 +129,16 @@ class CopyWorkload {
  public:
   CopyWorkload(librados::IoCtx *ioctx, SourceManager *src, int qdepth,
       size_t obj_size) :
-    ioctx_(ioctx), src_oids_(src->src_oids()),
+    ioctx_(ioctx), src_oids_(src->src_oids(obj_size)),
     num_objs_(src_oids_.size()), qdepth_(qdepth)
   {
     assert(num_objs_ > 0);
     assert(qdepth_ > 0);
-    src->verify_src_oids(src_oids_, obj_size);
   }
 
   virtual ~CopyWorkload() {}
 
-  void run() {
+  void run(const std::string& stats_fn) {
     // new name for this run
     set_dst_uuid();
 
@@ -132,6 +150,9 @@ class CopyWorkload {
 
     uint64_t ver = ioctx_->get_last_version();
 
+    bool stop = false;
+    std::thread monitor(&CopyWorkload::monitor, this, &stop);
+
     // spawn workers
     std::vector<std::thread> workers;
     for (int i = 0; i < qdepth_; i++) {
@@ -142,12 +163,60 @@ class CopyWorkload {
     // wait for finish
     std::for_each(workers.begin(), workers.end(),
         [](std::thread& t) { t.join(); });
+
+    stop = true;
+    monitor.join();
+
+    int fd = -1;
+    if (stats_fn == "-") {
+      fd = 0;
+    } else if (!stats_fn.empty()) {
+      fd = open(stats_fn.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0444);
+      assert(fd != -1);
+    }
+
+    std::lock_guard<std::mutex> l(lock_);
+
+    if (fd != -1) {
+      for (auto op_stats : op_stats_) {
+        dprintf(fd, "%s %d %lu %llu %llu\n",
+            dst_uuid_.c_str(), qdepth_, op_stats.bytes,
+            (unsigned long long)op_stats.begin,
+            (unsigned long long)op_stats.end);
+      }
+
+      fsync(fd);
+
+      if (fd != 0)
+        close(fd);
+    }
   }
 
+ protected:
   virtual void handle_copy(const std::string& src_oid,
       const std::string& dst_oid, uint64_t src_ver) = 0;
 
+  virtual std::string mode_name() const = 0;
+
  private:
+  void monitor(bool *stop) {
+    time_t start = time(NULL);
+    while (!*stop) {
+      sleep(1);
+
+      time_t dur = time(NULL) - start;
+      unsigned completed = oid_index_ + 1;
+      double rate = (double)completed / (double)dur;
+      int est = (double)(num_objs_ - completed) / rate;
+      est = std::max(0, est);
+
+      std::cout << mode_name() << " copy progress: "
+        << completed << "/" << num_objs_
+        << " est. secs: " << est << "\r" << std::flush;
+    }
+    std::cout << std::endl << std::flush;
+  }
+
   // generate a unique dst_uuid uuid
   void set_dst_uuid() {
     boost::uuids::uuid uuid =
@@ -160,7 +229,7 @@ class CopyWorkload {
   void verify_dst_oids() const {
     assert(!src_oids_.empty());
     for (auto src_oid : src_oids_) {
-      std::string dst_oid = make_dst_oid(src_oid);
+      std::string dst_oid = make_dst_oid(src_oid.first);
       int ret = ioctx_->stat(dst_oid, NULL, NULL);
       assert(ret == -ENOENT);
     }
@@ -173,38 +242,59 @@ class CopyWorkload {
   }
 
   void worker(uint64_t ver) {
+    std::vector<op_stat> op_stats;
+
     for (;;) {
       size_t idx = oid_index_.fetch_add(1);
       if (idx >= num_objs_)
         break;
 
-      std::string src_oid = src_oids_[idx];
-      std::string dst_oid = make_dst_oid(src_oid);
+      const auto src_oid = src_oids_[idx];
+      std::string dst_oid = make_dst_oid(src_oid.first);
 
-      handle_copy(src_oid, dst_oid, ver);
+      struct op_stat op;
+
+      op.begin = getns();
+      handle_copy(src_oid.first, dst_oid, ver);
+      op.end = getns();
+
+      op.bytes = src_oid.second;
+
+      op_stats.push_back(op);
     }
+
+    std::lock_guard<std::mutex> l(lock_);
+    op_stats_.insert(std::end(op_stats_),
+        std::begin(op_stats), std::end(op_stats));
   }
 
  protected:
   librados::IoCtx *ioctx_;
 
  private:
-  const std::vector<std::string> src_oids_;
+  const std::vector<std::pair<std::string, size_t>> src_oids_;
   const size_t num_objs_;
   const int qdepth_;
   std::string dst_uuid_;
   std::atomic_uint oid_index_;
+  std::mutex lock_;
+
+  struct op_stat {
+    uint64_t begin;
+    uint64_t end;
+    size_t bytes;
+  };
+
+  std::vector<op_stat> op_stats_;
 };
 
 class ClientCopyWorkload : public CopyWorkload {
  public:
   using CopyWorkload::CopyWorkload;
 
+ protected:
   virtual void handle_copy(const std::string& src_oid,
       const std::string& dst_oid, uint64_t src_ver) {
-
-    std::cout << "ClientCopyWorkload: " <<
-      src_oid << " >>> " << dst_oid << std::endl << std::flush;
 
     ceph::bufferlist bl;
     int ret = ioctx_->read(src_oid, bl, 0, 0);
@@ -214,22 +304,28 @@ class ClientCopyWorkload : public CopyWorkload {
     ret = ioctx_->write_full(dst_oid, bl);
     assert(ret == 0);
   }
+
+  virtual std::string mode_name() const {
+    return "client";
+  }
 };
 
 class ServerCopyWorkload : public CopyWorkload {
  public:
   using CopyWorkload::CopyWorkload;
 
+ protected:
   virtual void handle_copy(const std::string& src_oid,
       const std::string& dst_oid, uint64_t src_ver) {
-
-    std::cout << "ServerCopyWorkload: " <<
-      src_oid << " >>> " << dst_oid << std::endl << std::flush;
 
     librados::ObjectWriteOperation op;
     op.copy_from(src_oid, *ioctx_, src_ver);
     int ret = ioctx_->operate(dst_oid, &op);
     assert(ret == 0);
+  }
+
+  virtual std::string mode_name() const {
+    return "server";
   }
 };
 
@@ -242,12 +338,14 @@ int main(int argc, char **argv)
   int qdepth;
   bool copy_client;
   bool copy_server;
+  std::string stats_fn;
 
   po::options_description gen_opts("General options");
   gen_opts.add_options()
     ("help,h", "show help message")
     ("pool", po::value<std::string>(&pool)->required(), "rados pool")
     ("num-objs", po::value<size_t>(&num_objs)->default_value(0), "number of objects")
+    ("stats-fn", po::value<std::string>(&stats_fn)->default_value(""), "stats filename")
   ;
 
   po::options_description copy_opts("Copy workload options");
@@ -324,11 +422,11 @@ int main(int argc, char **argv)
 
   } else if (copy_client) {
     ClientCopyWorkload workload(&ioctx, &src_mgr, qdepth, obj_size);
-    workload.run();
+    workload.run(stats_fn);
 
   } else if (copy_server) {
     ServerCopyWorkload workload(&ioctx, &src_mgr, qdepth, obj_size);
-    workload.run();
+    workload.run(stats_fn);
   }
 
   ioctx.close();
