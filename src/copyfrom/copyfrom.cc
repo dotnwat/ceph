@@ -59,7 +59,7 @@ class SourceManager {
       // quick out
       size_t check_size;
       int ret = ioctx_->stat(oid.first, &check_size, NULL);
-      if (check_size == obj_size)
+      if (ret == 0 && check_size == obj_size)
         continue;
 
       // generate random object data
