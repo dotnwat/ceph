@@ -177,10 +177,13 @@ class CopyWorkload {
 
     std::lock_guard<std::mutex> l(lock_);
 
+    const std::string mode = mode_name();
+
     if (fd != -1) {
       for (auto op_stats : op_stats_) {
-        dprintf(fd, "%s %d %lu %llu %llu\n",
-            dst_uuid_.c_str(), qdepth_, op_stats.bytes,
+        dprintf(fd, "%s %s %d %lu %llu %llu\n",
+            mode.c_str(), dst_uuid_.c_str(),
+            qdepth_, op_stats.bytes,
             (unsigned long long)op_stats.begin,
             (unsigned long long)op_stats.end);
       }
