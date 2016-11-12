@@ -173,6 +173,19 @@ class CopyWorkload {
     stop = true;
     monitor.join();
 
+    const size_t num_dst_oids = dst_oids_.size();
+    size_t num_dst_oids_removed = 0;
+    for (auto oid : dst_oids_) {
+      int ret = ioctx_->remove(oid);
+      assert(ret == 0);
+
+      num_dst_oids_removed++;
+      std::cout << "cleaning up "
+        << num_dst_oids_removed << "/" << num_dst_oids
+        << " objects\r" << std::flush;
+    }
+    std::cout << std::endl << std::flush;
+
     int fd = -1;
     if (stats_fn == "-") {
       fd = 0;
@@ -252,6 +265,7 @@ class CopyWorkload {
 
   void worker(uint64_t ver) {
     std::vector<op_stat> op_stats;
+    std::vector<std::string> dst_oids;
 
     for (;;) {
       size_t idx = oid_index_.fetch_add(1);
@@ -270,11 +284,16 @@ class CopyWorkload {
       op.bytes = src_oid.second;
 
       op_stats.push_back(op);
+      dst_oids.push_back(dst_oid);
     }
 
     std::lock_guard<std::mutex> l(lock_);
+
     op_stats_.insert(std::end(op_stats_),
         std::begin(op_stats), std::end(op_stats));
+
+    dst_oids_.insert(std::end(dst_oids_),
+        std::begin(dst_oids), std::end(dst_oids));
   }
 
  protected:
@@ -295,6 +314,7 @@ class CopyWorkload {
   };
 
   std::vector<op_stat> op_stats_;
+  std::vector<std::string> dst_oids_;
 };
 
 class ClientCopyWorkload : public CopyWorkload {
