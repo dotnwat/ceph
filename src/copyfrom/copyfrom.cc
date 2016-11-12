@@ -30,7 +30,7 @@ class SourceManager {
     assert(num_objs_ > 0);
   }
 
-  void gen_src_objects(size_t obj_size) {
+  void gen_src_objects(const size_t obj_size) {
     // create random data to use for payloads
     const size_t rand_buf_size = 1ULL<<24;
     std::string rand_buf;
@@ -52,6 +52,16 @@ class SourceManager {
     size_t count = 0;
 
     for (auto oid : oids) {
+      std::cout << "writing object "
+        << ++count << "/" << total << ": "
+        << oid.first << "\r" << std::flush;
+
+      // quick out
+      size_t check_size;
+      int ret = ioctx_->stat(oid.first, &check_size, NULL);
+      if (check_size == obj_size)
+        continue;
+
       // generate random object data
       ceph::bufferlist bl;
       size_t left = obj_size;
@@ -63,11 +73,7 @@ class SourceManager {
       }
       assert(bl.length() == obj_size);
 
-      std::cout << "writing object "
-        << ++count << "/" << total << ": "
-        << oid.first << "\r" << std::flush;
-
-      int ret = ioctx_->remove(oid.first);
+      ret = ioctx_->remove(oid.first);
       assert(ret == 0 || ret == -ENOENT);
 
       ret = ioctx_->write_full(oid.first, bl);
