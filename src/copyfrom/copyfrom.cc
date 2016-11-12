@@ -199,8 +199,9 @@ class CopyWorkload {
     const std::string mode = mode_name();
 
     if (fd != -1) {
+      dprintf(fd, "mode,runid,qdepth,objsize,begin,end\n");
       for (auto op_stats : op_stats_) {
-        dprintf(fd, "%s %s %d %lu %llu %llu\n",
+        dprintf(fd, "%s,%s,%d,%lu,%llu,%llu\n",
             mode.c_str(), dst_uuid_.c_str(),
             qdepth_, op_stats.bytes,
             (unsigned long long)op_stats.begin,
