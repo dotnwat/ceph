@@ -4,17 +4,14 @@ set -x
 
 # params
 driver=$1
-pool=rbd
-num_objs=100
-objsize_mb=1
+pool=copyfrom
+num_objs=10000
+objsize_bytes=16777216
 repeat=3
 qdepths="1 2 4 8 16 32 64"
 
-# computed
-objsize_bytes=$(($objsize_mb * 1048576))
-
 # generate input data set
-echo "make source $num_objs objs * $objsize_mb/$objsize_bytes"
+echo "make source $num_objs objs * $objsize_bytes"
 $driver --pool $pool --gendata --num-objs ${num_objs} \
     --obj-size ${objsize_bytes}
 
@@ -28,8 +25,14 @@ for qdepth in $qdepths; do
       --num-objs ${num_objs} --obj-size ${objsize_bytes} \
       --stats-fn ${stats_fn}.client.csv
 
+    # let everything settle
+    sleep 300
+
     $driver --pool $pool --copy-server --qdepth $qdepth \
       --num-objs ${num_objs} --obj-size ${objsize_bytes} \
       --stats-fn ${stats_fn}.server.csv
+
+    # let everything settle
+    sleep 300
   done
 done
