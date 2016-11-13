@@ -1,0 +1,2 @@
+copyfrom: copyfrom.cc
+	g++ -std=c++11 -Wall -pthread -o $@ $< -lboost_program_options -lrados

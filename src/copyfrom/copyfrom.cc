@@ -10,7 +10,11 @@
 #include <boost/uuid/uuid_generators.hpp>
 #include <boost/uuid/uuid_io.hpp>
 #include <fcntl.h>
-#include "include/rados/librados.hpp"
+#ifdef __CEPH__
+# include "include/rados/librados.hpp"
+#else
+# include <rados/librados.hpp>
+#endif
 
 namespace po = boost::program_options;
 
