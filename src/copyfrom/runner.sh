@@ -8,7 +8,7 @@ pool=copyfrom
 num_objs=10000
 objsize_bytes=16777216
 repeat=3
-qdepths="1 2 4 8 16 32 64 128 256"
+qdepths="1 2 4 8 16 32 64 128 256 512"
 
 # generate input data set
 echo "make source $num_objs objs * $objsize_bytes"
