@@ -5,8 +5,8 @@ set -x
 # params
 driver=$1
 pool=copyfrom
-num_objs=10000
-objsize_bytes=16777216
+num_objs=20000
+objsize_bytes=8388608
 repeat=3
 qdepths="1 2 4 8 16 32 64 128 256 512"
 
