@@ -69,8 +69,64 @@ static void handle_aio_cb(librados::completion_t cb, void *arg)
   delete io;
 }
 
+static void delete_objects(librados::IoCtx *ioctx, int nobjs)
+{
+  assert(nobjs > 0);
+
+  for (int i = 0; i < nobjs; i++) {
+    stringstream ss;
+    ss << "obj." << i;
+    int ret = ioctx->remove(ss.str());
+    checkret(ret, 0);
+    std::cout << "removing object: " << ss.str() << " "
+      << (i+1) << "/" << nobjs
+      << "\r" << std::flush;
+  }
+
+  std::cout << std::endl << std::flush;
+}
+
+static void init_objects(librados::IoCtx *ioctx, int nobjs)
+{
+  assert(nobjs > 0);
+
+  for (int i = 0; i < nobjs; i++) {
+    stringstream ss;
+    ss << "obj." << i;
+
+    // setup op components
+    std::vector<int> ops({INIT_STATE});
+    uint64_t position = 0;
+    ceph::bufferlist blob;
+
+    ceph::bufferlist inbl;
+    ::encode(ops, inbl);
+    ::encode(position, inbl);
+    ::encode(blob, inbl);
+
+    ceph::bufferlist outbl;
+    int ret = ioctx->exec(ss.str(), "phydesign", "zlog", inbl, outbl);
+    checkret(ret, 0);
+
+    std::cout << "init object: " << ss.str() << " "
+      << (i+1) << "/" << nobjs
+      << "\r" << std::flush;
+  }
+
+  std::cout << std::endl << std::flush;
+}
+
+static std::vector<int> make_ops_vector(int *opnums)
+{
+  std::vector<int> ops;
+  for (int i = 1; i < 5; i++) {
+    ops.push_back(opnums[i]);
+  }
+  return ops;
+}
+
 static void workload_func(librados::IoCtx *ioctx, int nobjs,
-    const int qdepth, const int entry_size, int *opnums)
+    const unsigned qdepth, const int entry_size, int *opnums)
 {
   // create random data to use for payloads
   size_t rand_buf_size = 1ULL<<23;
@@ -87,56 +143,29 @@ static void workload_func(librados::IoCtx *ioctx, int nobjs,
   rand_dist = std::uniform_int_distribution<int>(0,
       rand_buf_size - entry_size - 1);
 
-  std::vector<int> ops;
-  for (int i = 1; i < 5; i++) {
-    ops.push_back(opnums[i]);
-  }
+  // ops vector describing seq of ops to run in object class
+  const std::vector<int> ops = make_ops_vector(opnums);
 
-  std::cout << "qdepth " << qdepth << " entry_size " << entry_size << std::endl;
+  // prepare the objects in the stripe
+  init_objects(ioctx, nobjs);
 
-  outstanding_ios = 0;
+  outstanding_ios = 0;    // maintains queue depth
+  uint64_t pos = 0;       // current log position
+
   std::unique_lock<std::mutex> lock(io_lock);
-
-  assert(nobjs > 0);
-  for (int i = 0; i < nobjs; i++) {
-    stringstream ss;
-    ss << "obj." << i;
-    std::cout << ss.str() << std::endl;
-
-    std::vector<int> init_ops;
-    init_ops.push_back(INIT_STATE);
-    ceph::bufferlist init_inbl;
-    ::encode(init_ops, init_inbl);
-    uint64_t init_pos = 0;
-    ::encode(init_pos, init_inbl);
-    ceph::bufferlist init_blob;
-    ::encode(init_blob, init_inbl);
-    ceph::bufferlist init_outbl;
-    int ret = ioctx->exec(ss.str(), "phydesign", "zlog", init_inbl, init_outbl);
-    checkret(ret, 0);
-  }
-
-  uint64_t pos = 0;
-
   for (;;) {
-    while (outstanding_ios < (unsigned)qdepth) {
-
+    while (outstanding_ios < qdepth) {
       // create aio context
       aio_state *io = new aio_state;
       io->c = librados::Rados::aio_create_completion(io, NULL, handle_aio_cb);
       assert(io->c);
 
-      // fill with random data
+      // create log entry from random data
       size_t buf_offset = rand_dist(generator);
-
-      stringstream ss;
-      ss << "obj." << (pos % nobjs);
-      pos++;
-
       ceph::bufferlist blob;
       blob.append(rand_buf_raw + buf_offset, entry_size);
 
-      uint64_t pos = 111;
+      // setup op
       ceph::bufferlist inbl;
       ::encode(ops, inbl);
       ::encode(pos, inbl);
@@ -145,16 +174,21 @@ static void workload_func(librados::IoCtx *ioctx, int nobjs,
       librados::ObjectWriteOperation op;
       op.exec("phydesign", "zlog", inbl);
 
-      int ret = ioctx->aio_operate(ss.str(), io->c, &op);
-      assert(ret == 0);
+      // generate target object name in stripe
+      stringstream ss;
+      ss << "obj." << (pos % nobjs);
 
+      int ret = ioctx->aio_operate(ss.str(), io->c, &op);
+      checkret(ret, 0);
+
+      pos++;
       outstanding_ios++;
     }
 
-    io_cond.wait(lock, [&]{ return outstanding_ios < (unsigned)qdepth || stop; });
+    io_cond.wait(lock, [&]{ return outstanding_ios < qdepth || stop; });
 
     if (stop)
-      return;
+      break;
   }
 
   for (;;) {
@@ -163,13 +197,12 @@ static void workload_func(librados::IoCtx *ioctx, int nobjs,
       break;
     sleep(1);
   }
+
+  delete_objects(ioctx, nobjs);
 }
 
 static void report(int stats_window, const std::string tp_log_fn)
 {
-  ios_completed = 0;
-  uint64_t window_start = getns();
-
   // open the output stream
   int fd = -1;
   if (!tp_log_fn.empty()) {
@@ -177,21 +210,26 @@ static void report(int stats_window, const std::string tp_log_fn)
     assert(fd != -1);
   }
 
+  // init
+  ios_completed = 0;
+  uint64_t window_start = getns();
+
   while (!stop) {
     sleep(stats_window);
+    if (stop)
+      break;
 
+    // re-sample
     uint64_t ios_completed_in_window = ios_completed.exchange(0);
     uint64_t window_end = getns();
-    uint64_t window_dur = window_end - window_start;
-    window_start = window_end;
 
+    // calc rate
+    uint64_t window_dur = window_end - window_start;
     double iops = (double)(ios_completed_in_window *
         1000000000ULL) / (double)window_dur;
 
     time_t now = time(NULL);
-
-    if (stop)
-      break;
+    std::cout << "time " << now << " iops " << (int)iops << std::endl;
 
     if (fd != -1) {
       dprintf(fd, "time %llu iops %llu\n",
@@ -199,7 +237,8 @@ static void report(int stats_window, const std::string tp_log_fn)
           (unsigned long long)iops);
     }
 
-    std::cout << "time " << now << " iops " << (int)iops << std::endl;
+    // reset
+    window_start = window_end;
   }
 
   if (fd != -1) {
@@ -208,6 +247,9 @@ static void report(int stats_window, const std::string tp_log_fn)
   }
 }
 
+/*
+ * 1: normal metadata in rocksdb and entries in bytestream
+ */
 static int op_combos[][5] = {
   {0, READ_EPOCH_OMAP, READ_OMAP_INDEX_ENTRY, WRITE_OMAP_INDEX_ENTRY, APPEND_DATA},
   {0, READ_EPOCH_OMAP, READ_OMAP_INDEX_ENTRY, APPEND_DATA, WRITE_OMAP_INDEX_ENTRY},
@@ -262,7 +304,6 @@ static int op_combos[][5] = {
 int main(int argc, char **argv)
 {
   std::string pool;
-  bool show_nops;
   unsigned opnum;
   unsigned qdepth;
   unsigned esize;
@@ -273,13 +314,12 @@ int main(int argc, char **argv)
   po::options_description gen_opts("General options");
   gen_opts.add_options()
     ("help,h", "show help message")
-    ("nops", po::bool_switch(&show_nops)->default_value(false), "print num ops")
     ("opnum", po::value<unsigned>(&opnum)->required(), "op num")
-    ("qdepth", po::value<unsigned>(&qdepth)->default_value(1), "qd")
-    ("esize", po::value<unsigned>(&esize)->default_value(1), "es")
-    ("runtime", po::value<int>(&runtime)->default_value(0), "rt")
-    ("pool,p", po::value<std::string>(&pool)->required(), "Pool")
-    ("nobjs", po::value<int>(&nobjs)->default_value(1), "num objs")
+    ("qdepth", po::value<unsigned>(&qdepth)->required(), "queue depth")
+    ("esize", po::value<unsigned>(&esize)->required(), "entry size")
+    ("runtime", po::value<int>(&runtime)->default_value(0), "runtime (sec)")
+    ("pool,p", po::value<std::string>(&pool)->required(), "pool")
+    ("nobjs", po::value<int>(&nobjs)->required(), "stripe size (num objects)")
     ("outfile", po::value<std::string>(&outfile)->default_value(""), "outfile")
   ;
 
@@ -297,16 +337,10 @@ int main(int argc, char **argv)
   po::notify(vm);
 
   unsigned nops = (sizeof(op_combos) / sizeof((op_combos)[0]));
-
-  if (show_nops) {
-    fprintf(stdout, "%u", nops);
-    exit(0);
-  }
+  assert(opnum < nops);
 
   signal(SIGINT, sigint_handler);
   stop = 0;
-
-  assert(opnum < nops);
 
   // connect to rados
   librados::Rados cluster;
@@ -322,6 +356,7 @@ int main(int argc, char **argv)
 
   std::thread runner(workload_func, &ioctx, nobjs,
     qdepth, esize, op_combos[opnum]);
+
   std::thread reporter(report, 2, outfile);
 
   if (runtime) {
