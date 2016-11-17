@@ -14,4 +14,26 @@
 
 #define APPEND_DATA             9
 
+struct entry_info {
+  uint64_t position;
+  ceph::bufferlist data;
+
+  entry_info() {}
+
+  void encode(bufferlist& bl) const {
+    ENCODE_START(1, 1, bl);
+    ::encode(position, bl);
+    ::encode(data, bl);
+    ENCODE_FINISH(bl);
+  }
+
+  void decode(bufferlist::iterator& bl) {
+    DECODE_START(1, bl);
+    ::decode(position, bl);
+    ::decode(data, bl);
+    DECODE_FINISH(bl);
+  }
+};
+WRITE_CLASS_ENCODER(entry_info)
+
 #endif

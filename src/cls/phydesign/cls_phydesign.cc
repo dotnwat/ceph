@@ -10,6 +10,8 @@ CLS_NAME(phydesign)
 
 cls_handle_t h_class;
 cls_method_handle_t h_zlog;
+cls_method_handle_t h_zlog_batch_write_simple;
+cls_method_handle_t h_zlog_batch_write_batch;
 
 /*
  * metadata/index entry for when the log entry data is stored in the
@@ -48,6 +50,7 @@ static inline std::string u64tostr(uint64_t value)
   return ss.str();
 }
 
+#if 0
 static std::string ops_to_string(const std::vector<int>& ops)
 {
   std::stringstream ss;
@@ -96,6 +99,211 @@ static std::string ops_to_string(const std::vector<int>& ops)
   }
 
   return ss.str();
+}
+#endif
+
+static int zlog_batch_write_batch(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  uint64_t epoch;
+  std::vector<entry_info> entries;
+
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(epoch, it);
+    ::decode(entries, it);
+  } catch (const buffer::error &err) {
+    CLS_ERR("ERROR: decoding ops");
+    return -EINVAL;
+  }
+
+  size_t num_entries = entries.size();
+  if (!num_entries) {
+    CLS_ERR("ERROR: entries list is empty");
+    return -EINVAL;
+  }
+
+  // simulate check epoch stored in omap header
+  bufferlist hdr_bl;
+  int ret = cls_cxx_map_read_header(hctx, &hdr_bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: map_read__header %d", ret);
+    return ret;
+  }
+
+  // figure out the bounds of the omap query
+  uint64_t min_pos, max_pos;
+  min_pos = max_pos = entries[0].position;
+  for (unsigned i = 1; i < num_entries; i++) {
+    min_pos = std::min(entries[i].position, min_pos);
+    max_pos = std::max(entries[i].position, max_pos);
+  }
+  min_pos = std::max(min_pos, (uint64_t)1); // just safety for 0 case below
+  if (min_pos > max_pos) {
+    CLS_ERR("min_pos %llu > max_pos %llu",
+        (unsigned long long)min_pos,
+        (unsigned long long)max_pos);
+    return -EINVAL;
+  }
+
+#if 0
+  CLS_ERR("ABC1: num_entries %d min_pos %d max_pos %d",
+      num_entries, min_pos, max_pos);
+#endif
+
+  // get all the entries for the span
+  std::map<std::string, ceph::bufferlist> stored_entries;
+  uint64_t count = max_pos - min_pos + 1;
+  const std::string& start_after = u64tostr(min_pos - 1);
+  ret = cls_cxx_map_get_vals(hctx, start_after, "", count,
+      &stored_entries);
+  if (ret < 0) {
+    CLS_ERR("ERROR: map get vals %d", ret);
+    return ret;
+  }
+
+  // get object size for append offset
+  uint64_t size;
+  ret = cls_cxx_stat(hctx, &size, NULL);
+  if (ret < 0) {
+    CLS_ERR("ERROR: stat %d", ret);
+    return ret;
+  }
+
+  // bytestream append blob
+  ceph::bufferlist append_bl;
+  // omap index updates
+  std::map<std::string, ceph::bufferlist> entries_update;
+
+  uint64_t offset = size;
+  for (auto& entry : entries) {
+    const std::string key = u64tostr(entry.position);
+
+    auto it = stored_entries.find(key);
+    if (it != stored_entries.end()) {
+      CLS_ERR("ERROR: should have found an entry %llu",
+          (unsigned long long)entry.position);
+      return -EINVAL;
+    }
+
+    // create and add entry to update set
+    ceph::bufferlist entry_bl;
+    struct entry e;
+    e.offset = offset;
+    e.length = entry.data.length();
+    ::encode(e, entry_bl);
+    entries_update[key] = entry_bl;
+
+    // update the append blob
+    append_bl.claim_append(entry.data, 0);
+
+    offset += e.length;
+  }
+
+#if 0
+  std::stringstream ss;
+  for (auto it = entries_update.begin();
+       it != entries_update.end(); it++) {
+    ss << it->first << " ";
+  }
+
+  const std::string entry_summary = ss.str();
+
+  CLS_ERR("XBC write %llu entries, off %llu, size %llu keys %s",
+      (unsigned long long)entries_update.size(),
+      (unsigned long long)size,
+      (unsigned long long)append_bl.length(),
+      entry_summary.c_str());
+#endif
+
+  // append entry payloads to object
+  ret = cls_cxx_write(hctx, size, append_bl.length(), &append_bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: write %d", ret);
+    return ret;
+  }
+
+  // update metadata
+  ret = cls_cxx_map_set_vals(hctx, &entries_update);
+  if (ret < 0) {
+    CLS_ERR("ERROR: map set vals %d", ret);
+    return ret;
+  }
+
+  return 0;
+}
+
+/*
+ * simple
+ * batch omap/write
+ * batch omap with outlier
+ */
+static int zlog_batch_write_simple(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  uint64_t epoch;
+  std::vector<entry_info> entries;
+
+  try {
+    bufferlist::iterator it = in->begin();
+    ::decode(epoch, it);
+    ::decode(entries, it);
+  } catch (const buffer::error &err) {
+    CLS_ERR("ERROR: decoding ops");
+    return -EINVAL;
+  }
+
+  if (entries.empty()) {
+    CLS_ERR("ERROR: entries list is empty");
+    return -EINVAL;
+  }
+
+  // simulate check epoch stored in omap header
+  bufferlist bl;
+  int ret = cls_cxx_map_read_header(hctx, &bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: map_read__header %d", ret);
+    return ret;
+  }
+
+  for (auto& entry : entries) {
+    // read the metadata associated with the position from omap
+    bufferlist key_bl;
+    const std::string key = u64tostr(entry.position);
+    int ret = cls_cxx_map_get_val(hctx, key, &key_bl);
+    if (ret < 0 && ret != -ENOENT) {
+      CLS_ERR("ERROR: getval %d", ret);
+      return ret;
+    }
+
+    // get object size for append
+    uint64_t size;
+    ret = cls_cxx_stat(hctx, &size, NULL);
+    if (ret < 0) {
+      CLS_ERR("ERROR: stat %d", ret);
+      return ret;
+    }
+
+    // append data payload to object
+    ret = cls_cxx_write(hctx, size, entry.data.length(), &entry.data);
+    if (ret < 0) {
+      CLS_ERR("ERROR: write %d", ret);
+      return ret;
+    }
+
+    // prepare metadata update
+    key_bl.clear();
+    struct entry e;
+    e.offset = size;
+    e.length = entry.data.length();
+    ::encode(e, bl);
+
+    ret = cls_cxx_map_set_val(hctx, key, &key_bl);
+    if (ret < 0) {
+      CLS_ERR("ERROR: setval %d", ret);
+      return ret;
+    }
+  }
+
+  return 0;
 }
 
 static int zlog(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
@@ -281,4 +489,12 @@ void __cls_init()
 
   cls_register_cxx_method(h_class, "zlog",
       CLS_METHOD_RD | CLS_METHOD_WR, zlog, &h_zlog);
+
+  cls_register_cxx_method(h_class, "zlog_batch_write_simple",
+      CLS_METHOD_RD | CLS_METHOD_WR, zlog_batch_write_simple,
+      &h_zlog_batch_write_simple);
+
+  cls_register_cxx_method(h_class, "zlog_batch_write_batch",
+      CLS_METHOD_RD | CLS_METHOD_WR, zlog_batch_write_batch,
+      &h_zlog_batch_write_batch);
 }
