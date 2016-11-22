@@ -12,6 +12,7 @@ cls_handle_t h_class;
 cls_method_handle_t h_zlog;
 cls_method_handle_t h_zlog_batch_write_simple;
 cls_method_handle_t h_zlog_batch_write_batch;
+cls_method_handle_t h_zlog_batch_write_batch_oident;
 
 /*
  * metadata/index entry for when the log entry data is stored in the
@@ -102,7 +103,8 @@ static std::string ops_to_string(const std::vector<int>& ops)
 }
 #endif
 
-static int zlog_batch_write_batch(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+static int __zlog_batch_write_batch(cls_method_context_t hctx, bufferlist *in, bufferlist *out,
+    bool identify_outlier)
 {
   uint64_t epoch;
   std::vector<entry_info> entries;
@@ -137,6 +139,10 @@ static int zlog_batch_write_batch(cls_method_context_t hctx, bufferlist *in, buf
     min_pos = std::min(entries[i].position, min_pos);
     max_pos = std::max(entries[i].position, max_pos);
   }
+  // add in the outlier to the query range. see the simple batch method for an
+  // explanation of the epoch/outlier usage.
+  if (!identify_outlier && epoch > 0)
+    min_pos = std::min(epoch, min_pos);
   min_pos = std::max(min_pos, (uint64_t)1); // just safety for 0 case below
   if (min_pos > max_pos) {
     CLS_ERR("min_pos %llu > max_pos %llu",
@@ -146,9 +152,20 @@ static int zlog_batch_write_batch(cls_method_context_t hctx, bufferlist *in, buf
   }
 
 #if 0
-  CLS_ERR("ABC1: num_entries %d min_pos %d max_pos %d",
-      num_entries, min_pos, max_pos);
+  CLS_ERR("ABC1: oident %d num_entries %d min_pos %d max_pos %d",
+      (int)identify_outlier, (int)num_entries, (int)min_pos, (int)max_pos);
 #endif
+
+  if (identify_outlier && epoch > 0) {
+    // read the metadata associated with the position from omap
+    bufferlist key_bl;
+    const std::string key = u64tostr(epoch);
+    int ret = cls_cxx_map_get_val(hctx, key, &key_bl);
+    (void)ret; // ignore return value
+#if 0
+    CLS_ERR("ABC3: fetching key for OUTLIER pos %s", key.c_str());
+#endif
+  }
 
   // get all the entries for the span
   std::map<std::string, ceph::bufferlist> stored_entries;
@@ -232,6 +249,16 @@ static int zlog_batch_write_batch(cls_method_context_t hctx, bufferlist *in, buf
   return 0;
 }
 
+static int zlog_batch_write_batch(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  return __zlog_batch_write_batch(hctx, in, out, false);
+}
+
+static int zlog_batch_write_batch_oident(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
+{
+  return __zlog_batch_write_batch(hctx, in, out, true);
+}
+
 /*
  * simple
  * batch omap/write
@@ -264,6 +291,23 @@ static int zlog_batch_write_simple(cls_method_context_t hctx, bufferlist *in, bu
     return ret;
   }
 
+  /*
+   * We've added a temporary hack by which the epoch parameter is used to
+   * transport the outlier parameter... the epoch isnt actually used in these
+   * prototypes so whatever. The outlier is a position we are going to query
+   * from omap, but treat as a failed append.
+   */
+  if (epoch > 0) {
+    // read the metadata associated with the position from omap
+    bufferlist key_bl;
+    const std::string key = u64tostr(epoch);
+    int ret = cls_cxx_map_get_val(hctx, key, &key_bl);
+    (void)ret; // ignore return value
+#if 0
+    CLS_ERR("ABC2: fetching key for OUTLIER pos %s", key.c_str());
+#endif
+  }
+
   for (auto& entry : entries) {
     // read the metadata associated with the position from omap
     bufferlist key_bl;
@@ -273,6 +317,10 @@ static int zlog_batch_write_simple(cls_method_context_t hctx, bufferlist *in, bu
       CLS_ERR("ERROR: getval %d", ret);
       return ret;
     }
+
+#if 0
+    CLS_ERR("ABC2: ENTRY POS NEXT NORMAL %s", key.c_str());
+#endif
 
     // get object size for append
     uint64_t size;
@@ -497,4 +545,8 @@ void __cls_init()
   cls_register_cxx_method(h_class, "zlog_batch_write_batch",
       CLS_METHOD_RD | CLS_METHOD_WR, zlog_batch_write_batch,
       &h_zlog_batch_write_batch);
+
+  cls_register_cxx_method(h_class, "zlog_batch_write_batch_oident",
+      CLS_METHOD_RD | CLS_METHOD_WR, zlog_batch_write_batch_oident,
+      &h_zlog_batch_write_batch_oident);
 }

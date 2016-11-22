@@ -118,7 +118,7 @@ static void init_objects(librados::IoCtx *ioctx, int nobjs)
 
 static void workload_func(librados::IoCtx *ioctx, int nobjs,
     const unsigned qdepth, const int entry_size, std::string opname,
-    int batchsize)
+    int batchsize, int outlier)
 {
   // create random data to use for payloads
   size_t rand_buf_size = 1ULL<<23;
@@ -176,9 +176,23 @@ static void workload_func(librados::IoCtx *ioctx, int nobjs,
         obj_pos[obj_idx] += nobjs;
       }
 
+      /*
+       * below we set epoch to outlier. this is just a hack to get the outlier
+       * parameter into the object class. when the outlier is set to zero
+       * there is no change to behavior. when it is larger than zero it
+       * defines a position (min_range - outlier) to add to the batch set.
+       */
+      assert(outlier >= 0);
+      uint64_t epoch = 0;
+      if (outlier > 0) {
+        if (entries[0].position <= (unsigned)outlier)
+          epoch = 1;
+        else
+          epoch = entries[0].position - outlier;
+      }
+
       // setup op input
       ceph::bufferlist inbl;
-      uint64_t epoch = 33;
       ::encode(epoch, inbl);
       ::encode(entries, inbl);
 
@@ -283,6 +297,7 @@ int main(int argc, char **argv)
   std::string outfile;
   int nobjs;
   int batchsize;
+  int outlier;
 
   po::options_description gen_opts("General options");
   gen_opts.add_options()
@@ -295,6 +310,7 @@ int main(int argc, char **argv)
     ("nobjs", po::value<int>(&nobjs)->required(), "stripe size (num objects)")
     ("batchsize", po::value<int>(&batchsize)->required(), "append batch size")
     ("outfile", po::value<std::string>(&outfile)->default_value(""), "outfile")
+    ("outlier", po::value<int>(&outlier)->required(), "outlier")
   ;
 
   po::options_description all_opts("Allowed options");
@@ -316,11 +332,14 @@ int main(int argc, char **argv)
   assert(runtime >= 0);
   assert(nobjs > 0);
   assert(batchsize > 0);
+  assert(outlier >= 0);
 
   if (opname == "simple") {
     opname = "zlog_batch_write_simple";
   } else if (opname == "batch") {
     opname = "zlog_batch_write_batch";
+  } else if (opname == "batch_oident") {
+    opname = "zlog_batch_write_batch_oident";
   } else {
     std::cerr << "invalid op name" << std::endl;
     exit(1);
@@ -342,7 +361,7 @@ int main(int argc, char **argv)
   checkret(ret, 0);
 
   std::thread runner(workload_func, &ioctx, nobjs,
-    qdepth, esize, opname, batchsize);
+    qdepth, esize, opname, batchsize, outlier);
 
   std::thread reporter(report, 2, outfile,
       batchsize, opname, qdepth, esize, nobjs);
