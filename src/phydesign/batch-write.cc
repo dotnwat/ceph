@@ -232,14 +232,14 @@ static void workload_func(librados::IoCtx *ioctx, int nobjs,
 
 static void report(int stats_window, const std::string tp_log_fn,
     int batchsize, const std::string opname, int qdepth, int esize,
-    int nobjs)
+    int nobjs, int outlier)
 {
   // open the output stream
   int fd = -1;
   if (!tp_log_fn.empty()) {
     fd = open(tp_log_fn.c_str(), O_WRONLY|O_CREAT|O_TRUNC, 0440);
     assert(fd != -1);
-    dprintf(fd, "time,opname,qdepth,esize,nobjs,batchsize,raw_iops,eff_iops\n");
+    dprintf(fd, "time,opname,outlier,qdepth,esize,nobjs,batchsize,raw_iops,eff_iops\n");
   }
 
   // init
@@ -266,9 +266,10 @@ static void report(int stats_window, const std::string tp_log_fn,
       << " eff_iops " << (int)eff_iops << std::endl;
 
     if (fd != -1) {
-      dprintf(fd, "%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu\n",
+      dprintf(fd, "%llu,%s,%llu,%llu,%llu,%llu,%llu,%llu,%llu\n",
           (unsigned long long)now,
           opname.c_str(),
+          (unsigned long long)outlier,
           (unsigned long long)qdepth,
           (unsigned long long)esize,
           (unsigned long long)nobjs,
@@ -364,7 +365,7 @@ int main(int argc, char **argv)
     qdepth, esize, opname, batchsize, outlier);
 
   std::thread reporter(report, 2, outfile,
-      batchsize, opname, qdepth, esize, nobjs);
+      batchsize, opname, qdepth, esize, nobjs, outlier);
 
   if (runtime) {
     sleep(runtime);
