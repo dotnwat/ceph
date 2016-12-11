@@ -251,6 +251,14 @@ set(cls_lua_client_srcs
     lua/cls_lua_client.cc)
 add_library(cls_lua_client STATIC ${cls_lua_client_srcs})
 
+# cls_zlog
+add_library(cls_zlog SHARED zlog/cls_zlog.cc)
+set_target_properties(cls_zlog PROPERTIES VERSION "1.0.0" SOVERSION "1")
+install(TARGETS cls_zlog DESTINATION ${cls_dir})
+add_library(cls_zlog_client SHARED zlog/cls_zlog_client.cc)
+install(FILES zlog/cls_zlog_client.h DESTINATION include/rados)
+install(TARGETS cls_zlog_client DESTINATION ${CMAKE_INSTALL_LIBDIR})
+
 list(APPEND cls_embedded_srcs ${cls_lua_srcs} ${cls_lua_client_srcs})
 
 if(WITH_EMBEDDED)
