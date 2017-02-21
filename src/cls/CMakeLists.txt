@@ -252,10 +252,21 @@ set(cls_lua_client_srcs
 add_library(cls_lua_client STATIC ${cls_lua_client_srcs})
 
 # cls_zlog
-add_library(cls_zlog SHARED zlog/cls_zlog.cc)
+find_package(Protobuf REQUIRED)
+include_directories(${PROTOBUF_INCLUDE_DIRS})
+PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS zlog/zlog.proto)
+add_library(zlog_proto SHARED ${PROTO_SRCS} ${PROTO_HDRS})
+target_link_libraries(zlog_proto ${PROTOBUF_LIBRARIES})
+
+add_library(cls_zlog SHARED zlog/cls_zlog.cc zlog/zlog_encoding.cc)
+target_include_directories(cls_zlog PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(cls_zlog zlog_proto)
 set_target_properties(cls_zlog PROPERTIES VERSION "1.0.0" SOVERSION "1")
 install(TARGETS cls_zlog DESTINATION ${cls_dir})
-add_library(cls_zlog_client SHARED zlog/cls_zlog_client.cc)
+
+add_library(cls_zlog_client zlog/cls_zlog_client.cc zlog/zlog_encoding.cc)
+target_include_directories(cls_zlog_client PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(cls_zlog_client zlog_proto)
 install(FILES zlog/cls_zlog_client.h DESTINATION include/rados)
 install(TARGETS cls_zlog_client DESTINATION ${CMAKE_INSTALL_LIBDIR})
 
