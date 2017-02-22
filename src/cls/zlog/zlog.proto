@@ -2,44 +2,6 @@ package zlog_proto;
 
 option optimize_for = SPEED;
 
-message MetaLog {
-    message StripeHistoryEntry {
-        required uint64 pos = 1;
-        required uint32 width = 2;
-        required uint64 epoch = 3;
-    }
-    repeated StripeHistoryEntry stripe_history = 1;
-}
-
-message MSeqRequest {
-    required uint64 epoch = 1;
-    required string pool = 2;
-    required string name = 3;
-    required bool next = 4;
-    required uint32 count = 5;
-    repeated uint64 stream_ids = 6 [packed = true];
-}
-
-message StreamBackPointer {
-    required uint64 id = 1;
-    repeated uint64 backpointer = 2 [packed = true];
-}
-
-message MSeqReply {
-    enum Status {
-        OK = 0;
-        INIT_LOG = 1;
-        STALE_EPOCH = 2;
-    }
-    repeated uint64 position = 1 [packed = true];
-    optional Status status = 2 [default = OK];
-    repeated StreamBackPointer stream_backpointers = 3;
-}
-
-message EntryHeader {
-  repeated StreamBackPointer stream_backpointers = 1;
-}
-
 message WriteOp {
   required uint64 epoch = 1;
   required uint64 pos = 2;

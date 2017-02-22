@@ -1,9 +1,41 @@
 #include <errno.h>
 #include <boost/lexical_cast.hpp>
 #include "objclass/objclass.h"
-#include "cls_zlog_client.h"
 #include "zlog.pb.h"
-#include "zlog_encoding.h"
+
+namespace zlog {
+
+  enum {
+    CLS_ZLOG_OK            = 0x00,
+    CLS_ZLOG_STALE_EPOCH   = 0x01,
+    CLS_ZLOG_READ_ONLY     = 0x02,
+    CLS_ZLOG_NOT_WRITTEN   = 0x03,
+    CLS_ZLOG_INVALIDATED   = 0x04,
+    CLS_ZLOG_INVALID_EPOCH = 0x05,
+  };
+
+}
+
+void encode(ceph::buffer::list& bl, google::protobuf::Message& msg) {
+  assert(msg.IsInitialized());
+  char buf[msg.ByteSize()];
+  assert(msg.SerializeToArray(buf, sizeof(buf)));
+  bl.append(buf, sizeof(buf));
+}
+
+/*
+ * TODO: handle errors without throwing exceptions...
+ */
+void decode(ceph::buffer::list& bl, google::protobuf::Message* msg) {
+  if (!msg->ParseFromString(bl.to_str())) {
+    cerr << "decode: unable to decode message" << endl;
+    throw buffer::malformed_input("decode: unable to decode message");
+  }
+  if (!msg->IsInitialized()) {
+    cerr << "decode: message is uninitialized" << endl;
+    throw buffer::malformed_input("decode: message is uninitialized");
+  }
+}
 
 CLS_VER(1,0)
 CLS_NAME(zlog)
