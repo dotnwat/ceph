@@ -253,14 +253,11 @@ add_library(cls_lua_client STATIC ${cls_lua_client_srcs})
 
 # cls_zlog
 find_package(Protobuf REQUIRED)
-include_directories(${PROTOBUF_INCLUDE_DIRS})
 PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS zlog/zlog.proto)
-add_library(zlog_proto SHARED ${PROTO_SRCS} ${PROTO_HDRS})
-target_link_libraries(zlog_proto ${PROTOBUF_LIBRARIES})
-
-add_library(cls_zlog SHARED zlog/cls_zlog.cc)
-target_include_directories(cls_zlog PUBLIC ${CMAKE_CURRENT_BINARY_DIR})
-target_link_libraries(cls_zlog zlog_proto)
+add_library(cls_zlog SHARED zlog/cls_zlog.cc ${PROTO_SRCS})
+target_include_directories(cls_zlog PUBLIC
+    ${PROTOBUF_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(cls_zlog ${PROTOBUF_LIBRARIES})
 set_target_properties(cls_zlog PROPERTIES VERSION "1.0.0" SOVERSION "1")
 install(TARGETS cls_zlog DESTINATION ${cls_dir})
 
