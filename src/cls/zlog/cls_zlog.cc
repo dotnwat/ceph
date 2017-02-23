@@ -23,18 +23,19 @@ void encode(ceph::buffer::list& bl, google::protobuf::Message& msg) {
   bl.append(buf, sizeof(buf));
 }
 
-/*
- * TODO: handle errors without throwing exceptions...
- */
-void decode(ceph::buffer::list& bl, google::protobuf::Message* msg) {
+bool decode(ceph::bufferlist& bl, google::protobuf::Message* msg) {
+  if (bl.length() == 0) {
+    return false;
+  }
   if (!msg->ParseFromString(bl.to_str())) {
-    cerr << "decode: unable to decode message" << endl;
-    throw buffer::malformed_input("decode: unable to decode message");
+    std::cerr << "decode: unable to decode message" << std::endl;
+    return false;
   }
   if (!msg->IsInitialized()) {
-    cerr << "decode: message is uninitialized" << endl;
-    throw buffer::malformed_input("decode: message is uninitialized");
+    std::cerr << "decode: message is uninitialized" << std::endl;
+    return false;
   }
+  return true;
 }
 
 CLS_VER(1,0)
@@ -146,9 +147,7 @@ static int get_epoch(cls_method_context_t hctx, uint64_t *pepoch)
     return ret;
 
   zlog_proto::GetEpochOp op;
-  try {
-    decode(bl, &op);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &op)) {
     CLS_LOG(0, "ERROR: check_epoch(): failed to decode epoch entry");
     return -EIO;
   }
@@ -168,9 +167,7 @@ static int get_epoch_v2(cls_method_context_t hctx, uint64_t *pepoch)
   }
 
   zlog_proto::GetEpochOp op;
-  try {
-    decode(bl, &op);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &op)) {
     CLS_LOG(0, "ERROR: check_epoch_v2(): failed to decode epoch entry");
     return -EIO;
   }
@@ -259,9 +256,7 @@ static int __max_position(cls_method_context_t hctx, uint64_t *pposition)
   
   // Using MaxPositionRet message here to avoid creating another message
   zlog_proto::MaxPositionRet reply;
-  try {
-    decode(bl, &reply);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &reply)) {
     CLS_LOG(0, "ERROR: __max_position(): failed to decode max_position entry");
     return -EIO;
   }
@@ -286,13 +281,11 @@ static int __max_position_v2(cls_method_context_t hctx, uint64_t *pposition)
   
   // Using MaxPositionRet message here to avoid creating another message
   zlog_proto::MaxPositionRet content;
-  try {
-    decode(bl, &content);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &content)) {
     CLS_LOG(0, "ERROR: __max_position_v2(): failed to decode max_position entry");
     return -EIO;
   }
-  
+
   *pposition = content.pos();
   return 0;
 }
@@ -301,9 +294,7 @@ static int read(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::ReadOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: read(): failed to decode input");
     return -EINVAL;
   }
@@ -328,9 +319,7 @@ static int read(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   // otherwise try to decode the entry
   zlog_proto::LogEntry entry;
-  try {
-    decode(bl, &entry);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &entry)) {
     CLS_LOG(0, "ERROR: read(): failed to decode index entry");
     return -EIO;
   }
@@ -338,7 +327,6 @@ static int read(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   if (entry.flags() & zlog_proto::LogEntry::INVALIDATED ||
         entry.flags() & zlog_proto::LogEntry::TRIMMED)
       return CLS_ZLOG_INVALIDATED;
-  CLS_LOG(0, "read 7");
   out->append(entry.data());
   return CLS_ZLOG_OK;
 }
@@ -347,13 +335,10 @@ static int write(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::WriteOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: write(): failed to decode input");
     return -EINVAL;
   }
-
   int ret = check_epoch(hctx, op.epoch());
   if (ret) {
     CLS_LOG(10, "NOTICE: write(): stale epoch value");
@@ -424,9 +409,7 @@ static int fill(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::FillOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: fill(): failed to decode input");
     return -EINVAL;
   }
@@ -461,9 +444,7 @@ static int fill(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   }
 
   // decode the entry from the index
-  try {
-    decode(bl, &entry);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &entry)) {
     CLS_LOG(0, "ERROR: fill(): failed to decode log entry");
     return -EIO;
   }
@@ -480,9 +461,7 @@ static int trim(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::TrimOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: trim(): failed to decode input");
     return -EINVAL;
   }
@@ -517,9 +496,7 @@ static int trim(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   }
 
   // decode the entry from the index
-  try {
-    decode(bl, &entry);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &entry)) {
     CLS_LOG(0, "ERROR: trim(): failed to decode log entry");
     return -EIO;
   }
@@ -546,13 +523,10 @@ static int seal(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::SealOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: seal(): failed to decode input");
     return -EINVAL;
   }
-
   // read the current epoch value (may not yet be set)
   bufferlist bl;
   int ret = cls_cxx_map_get_val(hctx, ZLOG_EPOCH_KEY, &bl);
@@ -565,9 +539,7 @@ static int seal(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   if (ret != -ENOENT) {
     // Using GetEpochOp message
     zlog_proto::GetEpochOp reply;
-    try {
-      decode(bl, &reply);
-    } catch (buffer::error& err) {
+    if (!decode(bl, &reply)) {
       CLS_LOG(0, "ERROR: seal(): failed to decode epoch entry");
       return -EIO;
     }
@@ -597,9 +569,7 @@ static int seal_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::SealOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if(!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: seal_v2(): failed to decode input");
     return -EINVAL;
   }
@@ -621,9 +591,7 @@ static int seal_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   if (ret > 0) {
     // Using GetEpochOp
     zlog_proto::GetEpochOp reply;
-    try {
-      decode(bl, &reply);
-    } catch (buffer::error& err) {
+    if (!decode(bl, &reply)) {
       CLS_LOG(0, "ERROR: seal_v2(): failed to decode epoch entry");
       return -EIO;
     }
@@ -653,9 +621,7 @@ static int read_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::ReadOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: read_v2(): failed to decode input");
     return -EINVAL;
   }
@@ -681,9 +647,7 @@ static int read_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
   // if position is found decode the entry
   zlog_proto::LogEntryV2 entry;
-  try {
-    decode(entrybl, &entry);
-  } catch (buffer::error& err) {
+  if (!decode(entrybl, &entry)) {
     CLS_LOG(0, "ERROR: read_v2(): failed to decode index entry");
     return -EIO;
   }
@@ -719,9 +683,7 @@ static int write_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::WriteOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: write_v2(): failed to decode input");
     return -EINVAL;
   }
@@ -772,7 +734,6 @@ static int write_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 
     // write position metadata into omap index
     zlog_proto::LogEntryV2 entry;
-    
     entry.set_offset(object_size);
     entry.set_length(bl_data.length());
     
@@ -827,13 +788,10 @@ static int fill_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::FillOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: fill_v2(): failed to decode input");
     return -EINVAL;
   }
-
   int ret = check_epoch_v2(hctx, op.epoch());
   if (ret) {
     CLS_LOG(10, "NOTICE: fill_v2(): stale epoch value: %d", ret);
@@ -866,13 +824,10 @@ static int fill_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   }
 
   // decode the entry from the index
-  try {
-    decode(bl, &entry);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &entry)) {
     CLS_LOG(0, "ERROR: fill_v2(): failed to decode log entry");
     return -EIO;
   }
-
   // if it is already invalidated or filled, then report success
   if (entry.flags() & zlog_proto::LogEntryV2::INVALIDATED ||
         entry.flags() & zlog_proto::LogEntryV2::TRIMMED)  
@@ -885,9 +840,7 @@ static int trim_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   // decode input operation
   zlog_proto::TrimOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: trim_v2(): failed to decode input");
     return -EINVAL;
   }
@@ -923,9 +876,7 @@ static int trim_v2(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
   }
 
   // decode the entry from the index
-  try {
-    decode(bl, &entry);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &entry)) {
     CLS_LOG(0, "ERROR: trim_v2(): failed to decode log entry");
     return -EIO;
   }
@@ -964,9 +915,7 @@ static int max_position_v2(cls_method_context_t hctx, bufferlist *in,
     bufferlist *out)
 {
   zlog_proto::MaxPositionOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: max_position_v2(): failed to decode input");
     return -EINVAL;
   }
@@ -985,7 +934,6 @@ static int max_position_v2(cls_method_context_t hctx, bufferlist *in,
 
   uint64_t position;
   ret = __max_position_v2(hctx, &position);
-  CLS_LOG(0, "max v2 5");
   if (ret < 0 && ret != -ENOENT)
     return ret;
   
@@ -1015,9 +963,7 @@ static int max_position(cls_method_context_t hctx, bufferlist *in,
     bufferlist *out)
 {
   zlog_proto::MaxPositionOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: max_position(): failed to decode input");
     return -EINVAL;
   }
@@ -1079,15 +1025,12 @@ static int __get_latest_projection(cls_method_context_t hctx,
   }
   
   zlog_proto::GetLatestProjectionOp op;
-  try {
-    decode(bl, &op);
-  } catch (buffer::error& err) {
+  if (!decode(bl, &op)) {
     CLS_LOG(0, "ERROR: __get_latest_projection: cannot decode");
     return -EIO;
   }
 
   *pepoch = op.epoch();
-
   return 0;
 }
 
@@ -1143,12 +1086,11 @@ static int __set_projection(cls_method_context_t hctx, uint64_t epoch, bufferlis
 static int set_projection(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   zlog_proto::SetProjectionOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if(!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: set_projection: failed to decode input");
     return -EINVAL;
   }
+
   // get the latest projection, if one exists
   uint64_t epoch;
   int ret = __get_latest_projection(hctx, &epoch);
@@ -1188,9 +1130,7 @@ static int set_projection(cls_method_context_t hctx, bufferlist *in, bufferlist 
 static int get_projection(cls_method_context_t hctx, bufferlist *in, bufferlist *out)
 {
   zlog_proto::GetProjectionOp op;
-  try {
-    decode(*in, &op);
-  } catch (buffer::error& err) {
+  if (!decode(*in, &op)) {
     CLS_LOG(0, "ERROR: get_projection: failed to decode input");
     return -EINVAL;
   }
