@@ -23,6 +23,14 @@ int __cls_ver_min = min;
 #define CLS_NAME(name) \
 int __cls_name__## name = 0; \
 const char *__cls_name = #name;
+#define CLS_INIT(name) \
+void CEPH_CLS_API __cls_init()
+#else
+#define CLS_VER(maj,min)
+#define CLS_NAME(name)
+#define CLS_INIT(name) \
+void CEPH_CLS_API name##_cls_init()
+#endif
 
 #define CLS_METHOD_RD       0x1 /// method executes read operations
 #define CLS_METHOD_WR       0x2 /// method executes write operations
@@ -176,8 +184,6 @@ extern int cls_cxx_map_get_val(cls_method_context_t hctx,
 extern int cls_cxx_map_set_val(cls_method_context_t hctx,
                                const std::string &key, bufferlist *inbl);
 
-
-#endif
 
 #endif
 

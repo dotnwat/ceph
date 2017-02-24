@@ -23,7 +23,7 @@ struct obj_list_watch_response_t;
 extern "C" {
 #endif
 
-#ifndef BUILDING_FOR_EMBEDDED
+//#ifndef BUILDING_FOR_EMBEDDED
 #define CLS_METHOD_PUBLIC   0x4 /// unused
 
 typedef void *cls_filter_handle_t;

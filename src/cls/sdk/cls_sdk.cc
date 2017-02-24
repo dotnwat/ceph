@@ -71,6 +71,6 @@ void __cls_init()
   cls_register("sdk", &h_class);
 
   cls_register_cxx_method(h_class, "test_coverage",
-      CLS_METHOD_RD | CLS_METHOD_RD | CLS_METHOD_PROMOTE,
+      CLS_METHOD_RD | CLS_METHOD_WR | CLS_METHOD_PROMOTE,
       test_coverage, &h_test_coverage);
 }
