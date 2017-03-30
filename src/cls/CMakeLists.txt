@@ -253,6 +253,18 @@ add_library(cls_lua_client STATIC ${cls_lua_client_srcs})
 
 list(APPEND cls_embedded_srcs ${cls_lua_srcs} ${cls_lua_client_srcs})
 
+# cls_verve
+find_package(Protobuf REQUIRED)
+PROTOBUF_GENERATE_CPP(PROTO_SRCS PROTO_HDRS verve/verve.proto)
+set(cls_verve_srcs verve/cls_verve.cc)
+add_library(cls_verve SHARED ${cls_verve_srcs} ${PROTO_SRCS})
+target_include_directories(cls_verve PUBLIC
+    ${PROTOBUF_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(cls_verve ${PROTOBUF_LIBRARIES})
+set_target_properties(cls_verve PROPERTIES VERSION "1.0.0" SOVERSION "1")
+install(TARGETS cls_verve DESTINATION ${cls_dir})
+list(APPEND cls_embedded_srcs ${cls_verve_srcs})
+
 if(WITH_EMBEDDED)
   include(MergeStaticLibraries)
   list(REMOVE_DUPLICATES cls_embedded_srcs)
@@ -261,5 +273,6 @@ if(WITH_EMBEDDED)
   # so that cls_lua srcs build correctly
   target_link_libraries(cephd_cls_base liblua)
   set_target_properties(cephd_cls_base PROPERTIES COMPILE_DEFINITIONS BUILDING_FOR_EMBEDDED)
+  target_include_directories(cephd_cls_base PUBLIC ${PROTOBUF_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
   merge_static_libraries(cephd_cls cephd_cls_base liblua)
 endif()

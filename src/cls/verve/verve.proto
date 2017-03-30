@@ -1,0 +1,29 @@
+package verve;
+
+option optimize_for = SPEED;
+
+message ByteExtent {
+    required uint64 offset = 1;
+    required uint64 length = 2;
+}
+
+message ByteExtentValue {
+    required ByteExtent extent = 1;
+    required bytes value = 2;
+}
+
+message ExecuteAndPrepare {
+    required uint64 tid = 1;
+    repeated ByteExtent reads = 2;
+    repeated ByteExtentValue writes = 3;
+    repeated ByteExtentValue compares = 4;
+}
+
+message Reads {
+    repeated ByteExtentValue read = 2;
+}
+
+message Locks {
+    repeated ByteExtent read_locks = 1;
+    repeated ByteExtent write_locks = 2;
+}
