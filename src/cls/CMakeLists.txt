@@ -258,6 +258,23 @@ add_library(cls_lua_client STATIC ${cls_lua_client_srcs})
 
 list(APPEND cls_embedded_srcs ${cls_lua_srcs} ${cls_lua_client_srcs})
 
+find_package(Protobuf REQUIRED)
+PROTOBUF_GENERATE_CPP(ZLOG_PROTO_SRCS ZLOG_PROTO_HDRS zlog/zlog.proto)
+add_library(cls_zlog SHARED zlog/cls_zlog.cc ${ZLOG_PROTO_SRCS})
+target_include_directories(cls_zlog PUBLIC
+    ${PROTOBUF_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+target_link_libraries(cls_zlog ${PROTOBUF_LIBRARIES})
+set_target_properties(cls_zlog PROPERTIES
+  VERSION "1.0.0"
+  SOVERSION "1"
+  INSTALL_RPATH "")
+install(TARGETS cls_zlog DESTINATION ${cls_dir})
+
+add_library(cls_zlog_client STATIC zlog/cls_zlog_client.cc ${ZLOG_PROTO_SRCS})
+target_link_libraries(cls_zlog_client ${PROTOBUF_LIBRARIES})
+target_include_directories(cls_zlog_client PUBLIC
+    ${PROTOBUF_INCLUDE_DIRS} ${CMAKE_CURRENT_BINARY_DIR})
+
 if(WITH_EMBEDDED)
   include(MergeStaticLibraries)
   list(REMOVE_DUPLICATES cls_embedded_srcs)

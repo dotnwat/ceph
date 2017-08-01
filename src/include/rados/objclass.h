@@ -11,6 +11,12 @@
 extern "C" {
 #endif
 
+#if __GNUC__ >= 4
+  #define CEPH_CLS_API    __attribute__ ((visibility ("default")))
+#else
+  #define CEPH_CLS_API
+#endif
+
 #ifndef BUILDING_FOR_EMBEDDED
 #define CLS_VER(maj,min) \
 int __cls_ver__## maj ## _ ##min = 0; \
