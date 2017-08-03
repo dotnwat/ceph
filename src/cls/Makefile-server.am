@@ -84,4 +84,14 @@ libcls_journal_la_LIBADD = $(PTHREAD_LIBS) $(EXTRALIBS)
 libcls_journal_la_LDFLAGS = ${AM_LDFLAGS} -module -avoid-version -shared -export-symbols-regex '.*__cls_.*'
 radoslib_LTLIBRARIES += libcls_journal.la
 
+BUILT_SOURCES += cls/zlog/zlog.pb.cc cls/zlog/zlog.pb.h
+
+cls/zlog/zlog.pb.cc cls/zlog/zlog.pb.h: cls/zlog/zlog.proto
+	$(PROTOC) --proto_path=$(srcdir) --cpp_out=$(builddir) $^
+
+libcls_zlog_la_SOURCES = cls/zlog/cls_zlog.cc cls/zlog/zlog.pb.cc
+libcls_zlog_la_LIBADD = $(PTHREAD_LIBS) $(EXTRALIBS) $(PROTOBUF_LIBS)
+libcls_zlog_la_LDFLAGS = ${AM_LDFLAGS} -module -avoid-version -shared -export-symbols-regex '.*__cls_.*'
+radoslib_LTLIBRARIES += libcls_zlog.la
+
 endif # WITH_OSD

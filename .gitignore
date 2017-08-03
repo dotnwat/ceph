@@ -90,3 +90,6 @@ GTAGS
 
 # editor backup files etc.
 \#*\#
+
+*.pb.cc
+*.pb.h
