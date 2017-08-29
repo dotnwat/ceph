@@ -19,6 +19,26 @@ enum EntryState {
   Invalid = 2,
 };
 
+static inline void calc_layout(uint64_t pos, uint32_t stripe_width,
+    uint32_t entries_per_object, uint32_t entry_size,
+    uint64_t *pobjectno, uint64_t *pslot_size, uint64_t *poffset)
+{
+  // logical layout
+  const uint64_t stripe_num = pos / stripe_width;
+  const uint64_t slot = stripe_num % entries_per_object;
+  const uint64_t stripepos = pos % stripe_width;
+  const uint64_t objectsetno = stripe_num / entries_per_object;
+  const uint64_t objectno = objectsetno * stripe_width + stripepos;
+
+  // physical layout
+  const uint64_t slot_size = sizeof(uint8_t) + entry_size;
+  const uint64_t offset = slot * slot_size;
+
+  *pobjectno = objectno;
+  *pslot_size = slot_size;
+  *poffset = offset;
+}
+
 static int read_meta(cls_method_context_t hctx, zlog_proto::ObjectMeta& omd)
 {
   ceph::bufferlist bl;
@@ -138,22 +158,22 @@ static int read(cls_method_context_t hctx, ceph::bufferlist *in,
     return -EIO;
   }
 
-  // logical layout
-  const uint64_t stripe_num = op.position() / omd.params().stripe_width();
-  const uint64_t slot = stripe_num % omd.params().entries_per_object();
-  const uint64_t stripepos = op.position() % omd.params().stripe_width();
-  const uint64_t objectsetno = stripe_num / omd.params().entries_per_object();
-  const uint64_t objectno = objectsetno * omd.params().stripe_width() + stripepos;
+  uint64_t objectno;
+  uint64_t slot_size;
+  uint64_t offset;
+  calc_layout(op.position(),
+      omd.params().stripe_width(),
+      omd.params().entries_per_object(),
+      omd.params().entry_size(),
+      &objectno,
+      &slot_size,
+      &offset);
 
   // defensive check: object identity match for this position?
   if (omd.params().object_id() != objectno) {
     CLS_ERR("ERROR: read(): wrong object target");
     return -EFAULT;
   }
-
-  // physical layout
-  const uint64_t slot_size = sizeof(uint8_t) + omd.params().entry_size();
-  const uint64_t offset = slot * slot_size;
 
   // read entry
   if ((offset + slot_size) <= objsize) {
@@ -228,12 +248,16 @@ static int write(cls_method_context_t hctx, ceph::bufferlist *in,
     return -EIO;
   }
 
-  // logical layout
-  const uint64_t stripe_num = op.position() / omd.params().stripe_width();
-  const uint64_t slot = stripe_num % omd.params().entries_per_object();
-  const uint64_t stripepos = op.position() % omd.params().stripe_width();
-  const uint64_t objectsetno = stripe_num / omd.params().entries_per_object();
-  const uint64_t objectno = objectsetno * omd.params().stripe_width() + stripepos;
+  uint64_t objectno;
+  uint64_t slot_size;
+  uint64_t offset;
+  calc_layout(op.position(),
+      omd.params().stripe_width(),
+      omd.params().entries_per_object(),
+      omd.params().entry_size(),
+      &objectno,
+      &slot_size,
+      &offset);
 
   // defensive check: object identity match for this position?
   if (omd.params().object_id() != objectno) {
@@ -241,13 +265,9 @@ static int write(cls_method_context_t hctx, ceph::bufferlist *in,
     return -EFAULT;
   }
 
-  // physical layout
-  uint8_t hdr = 0;
-  const uint64_t slot_size = sizeof(hdr) + omd.params().entry_size();
-  const uint64_t offset = slot * slot_size;
-
   // read entry header. correctness depends on zero'ed holes. alternatively,
   // we could "format" the object.
+  uint8_t hdr = 0;
   if (offset < objsize) {
     ceph::bufferlist hdr_bl;
     ret = cls_cxx_read(hctx, offset, sizeof(hdr), &hdr_bl);
@@ -330,12 +350,16 @@ static int invalidate(cls_method_context_t hctx, ceph::bufferlist *in,
     return -EIO;
   }
 
-  // logical layout
-  const uint64_t stripe_num = op.position() / omd.params().stripe_width();
-  const uint64_t slot = stripe_num % omd.params().entries_per_object();
-  const uint64_t stripepos = op.position() % omd.params().stripe_width();
-  const uint64_t objectsetno = stripe_num / omd.params().entries_per_object();
-  const uint64_t objectno = objectsetno * omd.params().stripe_width() + stripepos;
+  uint64_t objectno;
+  uint64_t slot_size;
+  uint64_t offset;
+  calc_layout(op.position(),
+      omd.params().stripe_width(),
+      omd.params().entries_per_object(),
+      omd.params().entry_size(),
+      &objectno,
+      &slot_size,
+      &offset);
 
   // defensive check: object identity match for this position?
   if (omd.params().object_id() != objectno) {
@@ -343,11 +367,7 @@ static int invalidate(cls_method_context_t hctx, ceph::bufferlist *in,
     return -EFAULT;
   }
 
-  // physical layout
   uint8_t hdr = 0;
-  const uint64_t slot_size = sizeof(hdr) + omd.params().entry_size();
-  const uint64_t offset = slot * slot_size;
-
   if (offset < objsize && !op.force()) {
     ceph::bufferlist hdr_bl;
     ret = cls_cxx_read(hctx, offset, sizeof(hdr), &hdr_bl);
