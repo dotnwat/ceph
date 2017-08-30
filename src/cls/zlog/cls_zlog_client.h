@@ -13,4 +13,7 @@ namespace cls_zlog_client {
 
   void invalidate(librados::ObjectWriteOperation& op, uint64_t position,
       bool force = false);
+
+  void view_init(librados::ObjectWriteOperation& op, uint32_t entry_size,
+      uint32_t stripe_width, uint32_t entries_per_object, uint32_t num_stripes);
 }

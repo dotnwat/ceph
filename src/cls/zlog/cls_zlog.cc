@@ -19,6 +19,16 @@ enum EntryState {
   Invalid = 2,
 };
 
+/*
+ * Convert numeric value into zero-padded string for omap comparisons.
+ */
+static inline std::string u64tostr(uint64_t value, const std::string& prefix)
+{
+  std::stringstream ss;
+  ss << prefix << std::setw(20) << std::setfill('0') << value;
+  return ss.str();
+}
+
 static inline void calc_layout(uint64_t pos, uint32_t stripe_width,
     uint32_t entries_per_object, uint32_t entry_size,
     uint64_t *pobjectno, uint64_t *pslot_size, uint64_t *poffset)
@@ -93,7 +103,7 @@ static int init(cls_method_context_t hctx, ceph::bufferlist *in,
     omd.mutable_params()->set_entry_size(op.params().entry_size());
     omd.mutable_params()->set_stripe_width(op.params().stripe_width());
     omd.mutable_params()->set_entries_per_object(op.params().entries_per_object());
-    omd.mutable_params()->set_object_id(op.params().object_id());
+    omd.set_object_id(op.object_id());
 
     ceph::bufferlist bl;
     cls_zlog::encode(bl, omd);
@@ -114,7 +124,7 @@ static int init(cls_method_context_t hctx, ceph::bufferlist *in,
   if (omd.params().entry_size() != op.params().entry_size() ||
       omd.params().stripe_width() != op.params().stripe_width() ||
       omd.params().entries_per_object() != op.params().entries_per_object() ||
-      omd.params().object_id() != op.params().object_id()) {
+      omd.object_id() != op.object_id()) {
     CLS_ERR("ERROR: init(): metadata mismatch");
     return -EINVAL;
   }
@@ -170,7 +180,7 @@ static int read(cls_method_context_t hctx, ceph::bufferlist *in,
       &offset);
 
   // defensive check: object identity match for this position?
-  if (omd.params().object_id() != objectno) {
+  if (omd.object_id() != objectno) {
     CLS_ERR("ERROR: read(): wrong object target");
     return -EFAULT;
   }
@@ -260,7 +270,7 @@ static int write(cls_method_context_t hctx, ceph::bufferlist *in,
       &offset);
 
   // defensive check: object identity match for this position?
-  if (omd.params().object_id() != objectno) {
+  if (omd.object_id() != objectno) {
     CLS_ERR("ERROR: write(): wrong object target");
     return -EFAULT;
   }
@@ -362,7 +372,7 @@ static int invalidate(cls_method_context_t hctx, ceph::bufferlist *in,
       &offset);
 
   // defensive check: object identity match for this position?
-  if (omd.params().object_id() != objectno) {
+  if (omd.object_id() != objectno) {
     CLS_ERR("ERROR: invalidate(): wrong object target");
     return -EFAULT;
   }
@@ -414,15 +424,68 @@ static int invalidate(cls_method_context_t hctx, ceph::bufferlist *in,
   return -EROFS;
 }
 
+static int view_init(cls_method_context_t hctx, ceph::bufferlist *in,
+    ceph::bufferlist *out)
+{
+  zlog_proto::ViewInitOp op;
+  if (!cls_zlog::decode(*in, &op)) {
+    CLS_ERR("ERROR: view_init(): failed to decode input");
+    return -EINVAL;
+  }
+
+  int ret = cls_cxx_stat(hctx, NULL, NULL);
+  if (ret != -ENOENT) {
+    if (ret >= 0) {
+      CLS_ERR("ERROR: view_init(): object already exists");
+      return -EEXIST;
+    }
+    CLS_ERR("ERROR: view_init(): stat error: %d", ret);
+    return ret;
+  }
+
+  zlog_proto::View view;
+  view.set_num_stripes(op.num_stripes());
+  view.mutable_params()->set_entry_size(op.params().entry_size());
+  view.mutable_params()->set_stripe_width(op.params().stripe_width());
+  view.mutable_params()->set_entries_per_object(op.params().entries_per_object());
+
+  if (view.num_stripes() == 0 ||
+      view.params().entry_size() == 0 ||
+      view.params().stripe_width() == 0 ||
+      view.params().entries_per_object() == 0) {
+    CLS_ERR("ERROR: view_init(): invalid view parameters");
+    return -EINVAL;
+  }
+
+  const uint64_t epoch = 0;
+  const std::string key = u64tostr(epoch, "view.epoch.");
+
+  ceph::bufferlist bl;
+  cls_zlog::encode(bl, view);
+  ret = cls_cxx_map_set_val(hctx, key, &bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: view_init(): could not write view: %d", ret);
+    return ret;
+  }
+
+  return 0;
+}
+
 CLS_INIT(zlog)
 {
   CLS_LOG(0, "loading cls_zlog");
 
   cls_handle_t h_class;
+
+  // log data object methods
   cls_method_handle_t h_init;
   cls_method_handle_t h_read;
   cls_method_handle_t h_write;
   cls_method_handle_t h_invalidate;
+
+  // log metadata object methods
+  cls_method_handle_t h_view_init;
+
 
   cls_register("zlog", &h_class);
 
@@ -441,4 +504,8 @@ CLS_INIT(zlog)
   cls_register_cxx_method(h_class, "invalidate",
       CLS_METHOD_RD | CLS_METHOD_WR,
       invalidate, &h_invalidate);
+
+  cls_register_cxx_method(h_class, "view_init",
+      CLS_METHOD_RD | CLS_METHOD_WR,
+      view_init, &h_view_init);
 }
