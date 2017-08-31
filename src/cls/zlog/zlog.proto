@@ -45,4 +45,13 @@ message ViewInitOp {
 message View {
   required StripeParams params = 1;
   required uint32 num_stripes = 2;
+  required uint64 epoch = 3;
+}
+
+message ViewReadOp {
+  required uint64 min_epoch = 1;
+}
+
+message ViewReadOpReply {
+  repeated View views = 1;
 }

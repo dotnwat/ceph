@@ -458,6 +458,8 @@ static int view_init(cls_method_context_t hctx, ceph::bufferlist *in,
   }
 
   const uint64_t epoch = 0;
+  view.set_epoch(epoch);
+
   const std::string key = u64tostr(epoch, "view.epoch.");
 
   ceph::bufferlist bl;
@@ -467,6 +469,58 @@ static int view_init(cls_method_context_t hctx, ceph::bufferlist *in,
     CLS_ERR("ERROR: view_init(): could not write view: %d", ret);
     return ret;
   }
+
+  return 0;
+}
+
+static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
+    ceph::bufferlist *out)
+{
+  zlog_proto::ViewReadOp op;
+  if (!cls_zlog::decode(*in, &op)) {
+    CLS_ERR("ERROR: view_read(): failed to decode input");
+    return -EINVAL;
+  }
+
+  int ret = cls_cxx_stat(hctx, NULL, NULL);
+  if (ret) {
+    CLS_ERR("ERROR: view_read(): failed to stat view object: %d", ret);
+    return ret;
+  }
+
+  zlog_proto::ViewReadOpReply reply;
+
+  uint64_t epoch = op.min_epoch();
+  while (true) {
+    ceph::bufferlist bl;
+    const std::string key = u64tostr(epoch, "view.epoch.");
+    int ret = cls_cxx_map_get_val(hctx, key, &bl);
+    if (ret < 0 && ret != -ENOENT) {
+      CLS_ERR("ERROR: view_read(): failed to read view: %d", ret);
+      return ret;
+    }
+
+    if (ret == -ENOENT)
+      break;
+
+    zlog_proto::View view;
+    if (!cls_zlog::decode(bl, &view)) {
+      CLS_ERR("ERROR: view_read(): failed to decode view");
+      return -EIO;
+    }
+
+    auto reply_view = reply.add_views();
+    *reply_view = view;
+
+    epoch++;
+  }
+
+  if (reply.views_size() == 0) {
+    CLS_ERR("ERROR: view_read(): no views found");
+    return -EINVAL;
+  }
+
+  cls_zlog::encode(*out, reply);
 
   return 0;
 }
@@ -485,6 +539,7 @@ CLS_INIT(zlog)
 
   // log metadata object methods
   cls_method_handle_t h_view_init;
+  cls_method_handle_t h_view_read;
 
 
   cls_register("zlog", &h_class);
@@ -508,4 +563,8 @@ CLS_INIT(zlog)
   cls_register_cxx_method(h_class, "view_init",
       CLS_METHOD_RD | CLS_METHOD_WR,
       view_init, &h_view_init);
+
+  cls_register_cxx_method(h_class, "view_read",
+      CLS_METHOD_RD,
+      view_read, &h_view_read);
 }

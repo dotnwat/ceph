@@ -60,4 +60,13 @@ void view_init(librados::ObjectWriteOperation& op, uint32_t entry_size,
   op.exec("zlog", "view_init", in);
 }
 
+void view_read(librados::ObjectReadOperation& op, uint64_t min_epoch)
+{
+  zlog_proto::ViewReadOp call;
+  call.set_min_epoch(min_epoch);
+  ceph::bufferlist in;
+  cls_zlog::encode(in, call);
+  op.exec("zlog", "view_read", in);
+}
+
 }
