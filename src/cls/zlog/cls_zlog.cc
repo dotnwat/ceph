@@ -470,6 +470,21 @@ static int view_init(cls_method_context_t hctx, ceph::bufferlist *in,
     return ret;
   }
 
+  const uint64_t max_pos = view.params().entries_per_object() *
+    view.params().stripe_width() * view.num_stripes() - 1;
+
+  zlog_proto::ViewMeta meta;
+  meta.set_max_epoch(0);
+  meta.set_max_position(max_pos);
+
+  ceph::bufferlist meta_bl;
+  cls_zlog::encode(meta_bl, meta);
+  ret = cls_cxx_setxattr(hctx, "zlog.view.meta", &meta_bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: view_init(): could not write metadata: %d", ret);
+    return ret;
+  }
+
   return 0;
 }
 
@@ -488,20 +503,40 @@ static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
     return ret;
   }
 
-  zlog_proto::ViewReadOpReply reply;
+  ceph::bufferlist meta_bl;
+  ret = cls_cxx_getxattr(hctx, "zlog.view.meta", &meta_bl);
+  if (ret < 0) {
+    if (ret == -ENODATA) {
+      CLS_ERR("ERROR: view_read(): metadata missing");
+      return -EIO;
+    }
+    CLS_ERR("ERROR: view_read(): failed to read metadata: %d", ret);
+    return ret;
+  }
 
+  zlog_proto::ViewMeta meta;
+  if (!cls_zlog::decode(meta_bl, &meta)) {
+    CLS_ERR("ERROR: view_read(): failed to decode metadata");
+    return -EIO;
+  }
+
+  const uint64_t max_epoch = meta.max_epoch();
   uint64_t epoch = op.min_epoch();
-  while (true) {
+
+  if (epoch > max_epoch) {
+    CLS_ERR("ERROR: view_read(): starting epoch too large");
+    return -EINVAL;
+  }
+
+  zlog_proto::ViewReadOpReply reply;
+  while (epoch <= max_epoch) {
     ceph::bufferlist bl;
     const std::string key = u64tostr(epoch, "view.epoch.");
     int ret = cls_cxx_map_get_val(hctx, key, &bl);
-    if (ret < 0 && ret != -ENOENT) {
+    if (ret < 0) {
       CLS_ERR("ERROR: view_read(): failed to read view: %d", ret);
       return ret;
     }
-
-    if (ret == -ENOENT)
-      break;
 
     zlog_proto::View view;
     if (!cls_zlog::decode(bl, &view)) {
@@ -515,12 +550,100 @@ static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
     epoch++;
   }
 
-  if (reply.views_size() == 0) {
-    CLS_ERR("ERROR: view_read(): no views found");
+  cls_zlog::encode(*out, reply);
+
+  return 0;
+}
+
+static int view_extend(cls_method_context_t hctx, ceph::bufferlist *in,
+    ceph::bufferlist *out)
+{
+  zlog_proto::ViewExtendOp op;
+  if (!cls_zlog::decode(*in, &op)) {
+    CLS_ERR("ERROR: view_extend(): failed to decode input");
     return -EINVAL;
   }
 
-  cls_zlog::encode(*out, reply);
+  int ret = cls_cxx_stat(hctx, NULL, NULL);
+  if (ret) {
+    CLS_ERR("ERROR: view_extend(): failed to stat view object: %d", ret);
+    return ret;
+  }
+
+  ceph::bufferlist meta_bl;
+  ret = cls_cxx_getxattr(hctx, "zlog.view.meta", &meta_bl);
+  if (ret < 0) {
+    if (ret == -ENODATA) {
+      CLS_ERR("ERROR: view_extend(): metadata missing");
+      return -EIO;
+    }
+    CLS_ERR("ERROR: view_extend(): failed to read metadata: %d", ret);
+    return ret;
+  }
+
+  zlog_proto::ViewMeta meta;
+  if (!cls_zlog::decode(meta_bl, &meta)) {
+    CLS_ERR("ERROR: view_extend(): failed to decode metadata");
+    return -EIO;
+  }
+
+  if (op.position() <= meta.max_position()) {
+    CLS_LOG(10, "view_extend(): position already mapped");
+    return 0;
+  }
+
+  const uint64_t max_epoch = meta.max_epoch();
+
+  ceph::bufferlist latest_view_bl;
+  const std::string latest_view_key = u64tostr(max_epoch, "view.epoch.");
+  ret = cls_cxx_map_get_val(hctx, latest_view_key, &latest_view_bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: view_extend(): failed to read view: %d", ret);
+    return ret;
+  }
+
+  zlog_proto::View latest_view;
+  if (!cls_zlog::decode(latest_view_bl, &latest_view)) {
+    CLS_ERR("ERROR: view_extend(): failed to decode view");
+    return -EIO;
+  }
+
+  const uint64_t next_epoch = max_epoch + 1;
+
+  zlog_proto::View next_view;
+  next_view = latest_view;
+  next_view.set_epoch(next_epoch);
+
+  const uint64_t entries_per_stripe =
+    next_view.params().entries_per_object() *
+    next_view.params().stripe_width();
+
+  const uint64_t entries_needed = op.position() - meta.max_position();
+  uint32_t stripes_needed = (entries_needed + entries_per_stripe - 1) / entries_per_stripe;
+
+  next_view.set_num_stripes(stripes_needed);
+
+  const uint64_t max_pos = meta.max_position() +
+    entries_per_stripe * stripes_needed;
+
+  const std::string next_view_key = u64tostr(next_epoch, "view.epoch.");
+  ceph::bufferlist next_view_bl;
+  cls_zlog::encode(next_view_bl, next_view);
+  ret = cls_cxx_map_set_val(hctx, next_view_key, &next_view_bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: view_extend(): could not write next view: %d", ret);
+    return ret;
+  }
+
+  meta.set_max_epoch(next_epoch);
+  meta.set_max_position(max_pos);
+  ceph::bufferlist new_meta_bl;
+  cls_zlog::encode(new_meta_bl, meta);
+  ret = cls_cxx_setxattr(hctx, "zlog.view.meta", &new_meta_bl);
+  if (ret < 0) {
+    CLS_ERR("ERROR: view_extend(): could not write new metadata: %d", ret);
+    return ret;
+  }
 
   return 0;
 }
@@ -540,7 +663,7 @@ CLS_INIT(zlog)
   // log metadata object methods
   cls_method_handle_t h_view_init;
   cls_method_handle_t h_view_read;
-
+  cls_method_handle_t h_view_extend;
 
   cls_register("zlog", &h_class);
 
@@ -567,4 +690,8 @@ CLS_INIT(zlog)
   cls_register_cxx_method(h_class, "view_read",
       CLS_METHOD_RD,
       view_read, &h_view_read);
+
+  cls_register_cxx_method(h_class, "view_extend",
+      CLS_METHOD_RD | CLS_METHOD_WR,
+      view_extend, &h_view_extend);
 }

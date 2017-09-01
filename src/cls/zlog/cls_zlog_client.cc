@@ -69,4 +69,13 @@ void view_read(librados::ObjectReadOperation& op, uint64_t min_epoch)
   op.exec("zlog", "view_read", in);
 }
 
+void view_extend(librados::ObjectWriteOperation& op, uint64_t position)
+{
+  zlog_proto::ViewExtendOp call;
+  call.set_position(position);
+  ceph::bufferlist in;
+  cls_zlog::encode(in, call);
+  op.exec("zlog", "view_extend", in);
+}
+
 }

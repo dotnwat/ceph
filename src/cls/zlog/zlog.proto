@@ -37,6 +37,11 @@ message InvalidateOp {
   required bool force = 2;
 }
 
+message ViewMeta {
+  required uint64 max_epoch = 1;
+  required uint64 max_position = 2;
+}
+
 message ViewInitOp {
   required StripeParams params = 1;
   required uint32 num_stripes = 2;
@@ -54,4 +59,8 @@ message ViewReadOp {
 
 message ViewReadOpReply {
   repeated View views = 1;
+}
+
+message ViewExtendOp {
+  required uint64 position = 1;
 }
