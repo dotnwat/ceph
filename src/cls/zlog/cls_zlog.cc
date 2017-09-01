@@ -49,7 +49,7 @@ static inline void calc_layout(uint64_t pos, uint32_t stripe_width,
   *poffset = offset;
 }
 
-static int read_meta(cls_method_context_t hctx, zlog_proto::ObjectMeta& omd)
+static int read_meta(cls_method_context_t hctx, zlog_ceph_proto::ObjectMeta& omd)
 {
   ceph::bufferlist bl;
   int ret = cls_cxx_getxattr(hctx, "meta", &bl);
@@ -78,7 +78,7 @@ static int read_meta(cls_method_context_t hctx, zlog_proto::ObjectMeta& omd)
 static int init(cls_method_context_t hctx, ceph::bufferlist *in,
     ceph::bufferlist *out)
 {
-  zlog_proto::InitOp op;
+  zlog_ceph_proto::InitOp op;
   if (!cls_zlog::decode(*in, &op)) {
     CLS_ERR("ERROR: init(): failed to decode input");
     return -EINVAL;
@@ -92,7 +92,7 @@ static int init(cls_method_context_t hctx, ceph::bufferlist *in,
   }
 
   // read (or initialize metadata)
-  zlog_proto::ObjectMeta omd;
+  zlog_ceph_proto::ObjectMeta omd;
   if (ret == 0) {
     int ret = read_meta(hctx, omd);
     if (ret < 0) {
@@ -135,7 +135,7 @@ static int init(cls_method_context_t hctx, ceph::bufferlist *in,
 static int read(cls_method_context_t hctx, ceph::bufferlist *in,
     ceph::bufferlist *out)
 {
-  zlog_proto::ReadOp op;
+  zlog_ceph_proto::ReadOp op;
   if (!cls_zlog::decode(*in, &op)) {
     CLS_ERR("ERROR: read(): failed to decode input");
     return -EINVAL;
@@ -153,7 +153,7 @@ static int read(cls_method_context_t hctx, ceph::bufferlist *in,
   }
 
   // read object metadata
-  zlog_proto::ObjectMeta omd;
+  zlog_ceph_proto::ObjectMeta omd;
   ret = read_meta(hctx, omd);
   if (ret < 0) {
     CLS_ERR("ERROR: read(): failed to read metadata");
@@ -205,13 +205,13 @@ static int read(cls_method_context_t hctx, ceph::bufferlist *in,
     if (hdr == static_cast<uint8_t>(EntryState::Taken)) {
       CLS_LOG(10, "read(): reading entry");
       out->append(bl.c_str() + sizeof(hdr), slot_size - sizeof(hdr));
-      return zlog_proto::ReadOp::OK;
+      return zlog_ceph_proto::ReadOp::OK;
     } else if (hdr == static_cast<uint8_t>(EntryState::Unused)) {
       CLS_LOG(10, "read(): entry not written");
-      return zlog_proto::ReadOp::UNWRITTEN;
+      return zlog_ceph_proto::ReadOp::UNWRITTEN;
     } else if (hdr == static_cast<uint8_t>(EntryState::Invalid)) {
       CLS_LOG(10, "read(): invalid entry");
-      return zlog_proto::ReadOp::INVALID;
+      return zlog_ceph_proto::ReadOp::INVALID;
     } else {
       CLS_ERR("ERROR: read(): unexpected status");
       return -EIO;
@@ -219,13 +219,13 @@ static int read(cls_method_context_t hctx, ceph::bufferlist *in,
   }
 
   CLS_LOG(10, "read(): entry not written (past eof)");
-  return zlog_proto::ReadOp::UNWRITTEN;
+  return zlog_ceph_proto::ReadOp::UNWRITTEN;
 }
 
 static int write(cls_method_context_t hctx, ceph::bufferlist *in,
     ceph::bufferlist *out)
 {
-  zlog_proto::WriteOp op;
+  zlog_ceph_proto::WriteOp op;
   if (!cls_zlog::decode(*in, &op)) {
     CLS_ERR("ERROR: write(): failed to decode input");
     return -EINVAL;
@@ -243,7 +243,7 @@ static int write(cls_method_context_t hctx, ceph::bufferlist *in,
   }
 
   // read object metadata
-  zlog_proto::ObjectMeta omd;
+  zlog_ceph_proto::ObjectMeta omd;
   ret = read_meta(hctx, omd);
   if (ret < 0) {
     CLS_ERR("ERROR: write(): failed to read metadata");
@@ -328,7 +328,7 @@ static int write(cls_method_context_t hctx, ceph::bufferlist *in,
 static int invalidate(cls_method_context_t hctx, ceph::bufferlist *in,
     ceph::bufferlist *out)
 {
-  zlog_proto::InvalidateOp op;
+  zlog_ceph_proto::InvalidateOp op;
   if (!cls_zlog::decode(*in, &op)) {
     CLS_ERR("ERROR: invalidate(): failed to decode input");
     return -EINVAL;
@@ -345,7 +345,7 @@ static int invalidate(cls_method_context_t hctx, ceph::bufferlist *in,
   }
 
   // read object metadata
-  zlog_proto::ObjectMeta omd;
+  zlog_ceph_proto::ObjectMeta omd;
   ret = read_meta(hctx, omd);
   if (ret < 0) {
     CLS_ERR("ERROR: invalidate(): failed to read metadata");
@@ -427,7 +427,7 @@ static int invalidate(cls_method_context_t hctx, ceph::bufferlist *in,
 static int view_init(cls_method_context_t hctx, ceph::bufferlist *in,
     ceph::bufferlist *out)
 {
-  zlog_proto::ViewInitOp op;
+  zlog_ceph_proto::ViewInitOp op;
   if (!cls_zlog::decode(*in, &op)) {
     CLS_ERR("ERROR: view_init(): failed to decode input");
     return -EINVAL;
@@ -443,7 +443,7 @@ static int view_init(cls_method_context_t hctx, ceph::bufferlist *in,
     return ret;
   }
 
-  zlog_proto::View view;
+  zlog_ceph_proto::View view;
   view.set_num_stripes(op.num_stripes());
   view.mutable_params()->set_entry_size(op.params().entry_size());
   view.mutable_params()->set_stripe_width(op.params().stripe_width());
@@ -473,7 +473,7 @@ static int view_init(cls_method_context_t hctx, ceph::bufferlist *in,
   const uint64_t max_pos = view.params().entries_per_object() *
     view.params().stripe_width() * view.num_stripes() - 1;
 
-  zlog_proto::ViewMeta meta;
+  zlog_ceph_proto::ViewMeta meta;
   meta.set_max_epoch(0);
   meta.set_max_position(max_pos);
 
@@ -491,7 +491,7 @@ static int view_init(cls_method_context_t hctx, ceph::bufferlist *in,
 static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
     ceph::bufferlist *out)
 {
-  zlog_proto::ViewReadOp op;
+  zlog_ceph_proto::ViewReadOp op;
   if (!cls_zlog::decode(*in, &op)) {
     CLS_ERR("ERROR: view_read(): failed to decode input");
     return -EINVAL;
@@ -514,7 +514,7 @@ static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
     return ret;
   }
 
-  zlog_proto::ViewMeta meta;
+  zlog_ceph_proto::ViewMeta meta;
   if (!cls_zlog::decode(meta_bl, &meta)) {
     CLS_ERR("ERROR: view_read(): failed to decode metadata");
     return -EIO;
@@ -528,7 +528,7 @@ static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
     return -EINVAL;
   }
 
-  zlog_proto::ViewReadOpReply reply;
+  zlog_ceph_proto::ViewReadOpReply reply;
   while (epoch <= max_epoch) {
     ceph::bufferlist bl;
     const std::string key = u64tostr(epoch, "view.epoch.");
@@ -538,7 +538,7 @@ static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
       return ret;
     }
 
-    zlog_proto::View view;
+    zlog_ceph_proto::View view;
     if (!cls_zlog::decode(bl, &view)) {
       CLS_ERR("ERROR: view_read(): failed to decode view");
       return -EIO;
@@ -558,7 +558,7 @@ static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
 static int view_extend(cls_method_context_t hctx, ceph::bufferlist *in,
     ceph::bufferlist *out)
 {
-  zlog_proto::ViewExtendOp op;
+  zlog_ceph_proto::ViewExtendOp op;
   if (!cls_zlog::decode(*in, &op)) {
     CLS_ERR("ERROR: view_extend(): failed to decode input");
     return -EINVAL;
@@ -581,7 +581,7 @@ static int view_extend(cls_method_context_t hctx, ceph::bufferlist *in,
     return ret;
   }
 
-  zlog_proto::ViewMeta meta;
+  zlog_ceph_proto::ViewMeta meta;
   if (!cls_zlog::decode(meta_bl, &meta)) {
     CLS_ERR("ERROR: view_extend(): failed to decode metadata");
     return -EIO;
@@ -602,7 +602,7 @@ static int view_extend(cls_method_context_t hctx, ceph::bufferlist *in,
     return ret;
   }
 
-  zlog_proto::View latest_view;
+  zlog_ceph_proto::View latest_view;
   if (!cls_zlog::decode(latest_view_bl, &latest_view)) {
     CLS_ERR("ERROR: view_extend(): failed to decode view");
     return -EIO;
@@ -610,7 +610,7 @@ static int view_extend(cls_method_context_t hctx, ceph::bufferlist *in,
 
   const uint64_t next_epoch = max_epoch + 1;
 
-  zlog_proto::View next_view;
+  zlog_ceph_proto::View next_view;
   next_view = latest_view;
   next_view.set_epoch(next_epoch);
 

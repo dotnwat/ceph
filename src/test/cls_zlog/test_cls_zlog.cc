@@ -95,7 +95,7 @@ static int do_view_init(librados::IoCtx& ioctx,
 
 static int do_view_read(librados::IoCtx& ioctx,
     uint64_t min_epoch,
-    zlog_proto::ViewReadOpReply &r,
+    zlog_ceph_proto::ViewReadOpReply &r,
     std::string oid = "obj")
 {
   auto op = new_rop();
@@ -212,7 +212,7 @@ TEST_F(ClsZlogTest, WriteInvalidMetadata) {
   int ret = ioctx.create("obj", true);
   ASSERT_EQ(ret, 0);
 
-  zlog_proto::ObjectMeta omd;
+  zlog_ceph_proto::ObjectMeta omd;
   omd.mutable_params()->set_entry_size(1);
   omd.mutable_params()->set_stripe_width(1);
   omd.mutable_params()->set_entries_per_object(1);
@@ -431,7 +431,7 @@ TEST_F(ClsZlogTest, ReadInvalidMetadata) {
   int ret = ioctx.create("obj", true);
   ASSERT_EQ(ret, 0);
 
-  zlog_proto::ObjectMeta omd;
+  zlog_ceph_proto::ObjectMeta omd;
   omd.mutable_params()->set_entry_size(1);
   omd.mutable_params()->set_stripe_width(1);
   omd.mutable_params()->set_entries_per_object(1);
@@ -444,7 +444,7 @@ TEST_F(ClsZlogTest, ReadInvalidMetadata) {
 
   bl.clear();
   ret = do_read(ioctx, 0, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 
   omd.mutable_params()->set_entry_size(0);
   bl.clear();
@@ -497,7 +497,7 @@ TEST_F(ClsZlogTest, ReadOk) {
 
   bufferlist bl2;
   ret = do_read(ioctx, 0, bl2);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::OK);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::OK);
 
   ASSERT_TRUE(memcmp(bl.c_str(), bl2.c_str(), 100) == 0);
 }
@@ -515,7 +515,7 @@ TEST_F(ClsZlogTest, ReadUnwrittenHole) {
 
   bufferlist bl2;
   ret = do_read(ioctx, 3, bl2);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 }
 
 TEST_F(ClsZlogTest, ReadUnwrittenPastEof) {
@@ -531,7 +531,7 @@ TEST_F(ClsZlogTest, ReadUnwrittenPastEof) {
 
   bufferlist bl2;
   ret = do_read(ioctx, 5, bl2);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 }
 
 TEST_F(ClsZlogTest, ReadInvalidatedPos) {
@@ -554,18 +554,18 @@ TEST_F(ClsZlogTest, ReadInvalidatedPos) {
 
   bl.clear();
   ret = do_read(ioctx, 4, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 
   bl.clear();
   ret = do_read(ioctx, 7, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 
   ret = do_invalidate(ioctx, 7, false);
   ASSERT_EQ(ret, 0);
 
   bl.clear();
   ret = do_read(ioctx, 7, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 }
 
 TEST_F(ClsZlogTest, InvalidateBadInput) {
@@ -607,7 +607,7 @@ TEST_F(ClsZlogTest, InvalidateInvalidMetadata) {
   int ret = ioctx.create("obj", true);
   ASSERT_EQ(ret, 0);
 
-  zlog_proto::ObjectMeta omd;
+  zlog_ceph_proto::ObjectMeta omd;
   omd.mutable_params()->set_entry_size(1);
   omd.mutable_params()->set_stripe_width(1);
   omd.mutable_params()->set_entries_per_object(1);
@@ -675,7 +675,7 @@ TEST_F(ClsZlogTest, ParamSweep) {
           oid << es << "." << sw << "." << eo << "." << objectno;
           bufferlist bl;
           int ret = do_read(ioctx, pos, bl, oid.str());
-          ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+          ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
         }
       }
     }
@@ -768,7 +768,7 @@ TEST_F(ClsZlogTest, ParamSweep) {
           ASSERT_EQ(ret, 0);
 
           ret = do_read(ioctx, pos, bl, oid.str());
-          ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+          ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 
           ret = do_write(ioctx, pos, bl, oid.str());
           ASSERT_EQ(ret, -EEXIST);
@@ -819,7 +819,7 @@ TEST_F(ClsZlogTest, InvalidateNoForcePastEof) {
   // read at 5; unwritten
   bl.clear();
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 
   // invalidate 5
   ret = do_invalidate(ioctx, 5, false);
@@ -827,7 +827,7 @@ TEST_F(ClsZlogTest, InvalidateNoForcePastEof) {
 
   // read at 5; invalid
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 }
 
 TEST_F(ClsZlogTest, InvalidateNoForceHole) {
@@ -845,7 +845,7 @@ TEST_F(ClsZlogTest, InvalidateNoForceHole) {
   // read at 3; unwritten
   bl.clear();
   ret = do_read(ioctx, 3, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 
   // invalidate 3
   ret = do_invalidate(ioctx, 3, false);
@@ -853,7 +853,7 @@ TEST_F(ClsZlogTest, InvalidateNoForceHole) {
 
   // read at 3; invalid
   ret = do_read(ioctx, 3, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 }
 
 TEST_F(ClsZlogTest, InvalidateNoForceAlreadyInvalid) {
@@ -863,21 +863,21 @@ TEST_F(ClsZlogTest, InvalidateNoForceAlreadyInvalid) {
   // read at 5; unwritten
   bufferlist bl;
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 
   ret = do_invalidate(ioctx, 5, false);
   ASSERT_EQ(ret, 0);
 
   // read at 5; invalid
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 
   ret = do_invalidate(ioctx, 5, false);
   ASSERT_EQ(ret, 0);
 
   // read at 5; still invalid
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 }
 
 TEST_F(ClsZlogTest, InvalidateNoForceReadOnly) {
@@ -912,7 +912,7 @@ TEST_F(ClsZlogTest, InvalidateForcePastEof) {
   // read at 5; unwritten
   bl.clear();
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 
   // invalidate 5
   ret = do_invalidate(ioctx, 5, true);
@@ -920,7 +920,7 @@ TEST_F(ClsZlogTest, InvalidateForcePastEof) {
 
   // read at 5; invalid
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 }
 
 TEST_F(ClsZlogTest, InvalidateForceUnwrittenHole) {
@@ -938,7 +938,7 @@ TEST_F(ClsZlogTest, InvalidateForceUnwrittenHole) {
   // read at 3; unwritten
   bl.clear();
   ret = do_read(ioctx, 3, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 
   // invalidate 3
   ret = do_invalidate(ioctx, 3, true);
@@ -946,7 +946,7 @@ TEST_F(ClsZlogTest, InvalidateForceUnwrittenHole) {
 
   // read at 3; invalid
   ret = do_read(ioctx, 3, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 }
 
 TEST_F(ClsZlogTest, InvalidateForceWritten) {
@@ -974,7 +974,7 @@ TEST_F(ClsZlogTest, InvalidateForceWritten) {
   ASSERT_EQ(ret, 0);
 
   ret = do_read(ioctx, 7, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 }
 
 TEST_F(ClsZlogTest, InvalidateForceInvalid) {
@@ -984,21 +984,21 @@ TEST_F(ClsZlogTest, InvalidateForceInvalid) {
   // read at 5; unwritten
   bufferlist bl;
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::UNWRITTEN);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::UNWRITTEN);
 
   ret = do_invalidate(ioctx, 5, false);
   ASSERT_EQ(ret, 0);
 
   // read at 5; invalid
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 
   ret = do_invalidate(ioctx, 5, true);
   ASSERT_EQ(ret, 0);
 
   // read at 5; still invalid
   ret = do_read(ioctx, 5, bl);
-  ASSERT_EQ(ret, zlog_proto::ReadOp::INVALID);
+  ASSERT_EQ(ret, zlog_ceph_proto::ReadOp::INVALID);
 }
 
 TEST_F(ClsZlogTest, ViewInitInvalidOp) {
@@ -1048,7 +1048,7 @@ TEST_F(ClsZlogTest, ViewReadInvalidOp) {
 }
 
 TEST_F(ClsZlogTest, ViewReadNotExists) {
-  zlog_proto::ViewReadOpReply r;
+  zlog_ceph_proto::ViewReadOpReply r;
   int ret = do_view_read(ioctx, 0, r);
   ASSERT_EQ(ret, -ENOENT);
 }
@@ -1059,7 +1059,7 @@ TEST_F(ClsZlogTest, ViewReadMinEpochNotExists) {
   ASSERT_EQ(ret, 0);
 
   // the min epoch should not exist
-  zlog_proto::ViewReadOpReply r;
+  zlog_ceph_proto::ViewReadOpReply r;
   ret = do_view_read(ioctx, 0, r, "obj2");
   ASSERT_EQ(ret, -EIO);
 }
@@ -1068,7 +1068,7 @@ TEST_F(ClsZlogTest, ViewReadEpochZeroAfterInit) {
   int ret = do_view_init(ioctx, 1, 2, 3, 4);
   ASSERT_EQ(ret, 0);
 
-  zlog_proto::ViewReadOpReply r;
+  zlog_ceph_proto::ViewReadOpReply r;
   ret = do_view_read(ioctx, 0, r);
   ASSERT_EQ(ret, 0);
 
@@ -1084,7 +1084,7 @@ TEST_F(ClsZlogTest, ViewReadPastEpoch) {
   int ret = do_view_init(ioctx, 1, 2, 3, 4);
   ASSERT_EQ(ret, 0);
 
-  zlog_proto::ViewReadOpReply r;
+  zlog_ceph_proto::ViewReadOpReply r;
   ret = do_view_read(ioctx, 1, r);
   ASSERT_EQ(ret, -EINVAL);
 }
@@ -1124,7 +1124,7 @@ TEST_F(ClsZlogTest, ViewExtendCoveredAfterInit) {
   ret = do_view_extend(ioctx, 499);
   ASSERT_EQ(ret, 0);
 
-  zlog_proto::ViewReadOpReply r;
+  zlog_ceph_proto::ViewReadOpReply r;
   ret = do_view_read(ioctx, 0, r);
   ASSERT_EQ(ret, 0);
 
@@ -1145,7 +1145,7 @@ TEST_F(ClsZlogTest, ViewExtendCovered) {
   ret = do_view_extend(ioctx, 499);
   ASSERT_EQ(ret, 0);
 
-  zlog_proto::ViewReadOpReply r;
+  zlog_ceph_proto::ViewReadOpReply r;
   ret = do_view_read(ioctx, 0, r);
   ASSERT_EQ(ret, 0);
   ASSERT_EQ(r.views_size(), 1);

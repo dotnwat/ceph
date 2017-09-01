@@ -1,4 +1,4 @@
-package zlog_proto;
+package zlog_ceph_proto;
 
 option optimize_for = SPEED;
 

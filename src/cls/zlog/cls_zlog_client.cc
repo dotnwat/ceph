@@ -6,7 +6,7 @@ void init(librados::ObjectWriteOperation& op, uint32_t entry_size,
     uint32_t stripe_width, uint32_t entries_per_object,
     uint64_t object_id)
 {
-  zlog_proto::InitOp call;
+  zlog_ceph_proto::InitOp call;
   call.mutable_params()->set_entry_size(entry_size);
   call.mutable_params()->set_stripe_width(stripe_width);
   call.mutable_params()->set_entries_per_object(entries_per_object);
@@ -18,7 +18,7 @@ void init(librados::ObjectWriteOperation& op, uint32_t entry_size,
 
 void read(librados::ObjectReadOperation& op, uint64_t position)
 {
-  zlog_proto::ReadOp call;
+  zlog_ceph_proto::ReadOp call;
   call.set_position(position);
   ceph::bufferlist in;
   cls_zlog::encode(in, call);
@@ -28,7 +28,7 @@ void read(librados::ObjectReadOperation& op, uint64_t position)
 void write(librados::ObjectWriteOperation& op, uint64_t position,
     ceph::bufferlist& data)
 {
-  zlog_proto::WriteOp call;
+  zlog_ceph_proto::WriteOp call;
   call.set_position(position);
   call.set_data(data.c_str(), data.length());
   ceph::bufferlist in;
@@ -39,7 +39,7 @@ void write(librados::ObjectWriteOperation& op, uint64_t position,
 void invalidate(librados::ObjectWriteOperation& op, uint64_t position,
     bool force)
 {
-  zlog_proto::InvalidateOp call;
+  zlog_ceph_proto::InvalidateOp call;
   call.set_position(position);
   call.set_force(force);
   ceph::bufferlist in;
@@ -50,7 +50,7 @@ void invalidate(librados::ObjectWriteOperation& op, uint64_t position,
 void view_init(librados::ObjectWriteOperation& op, uint32_t entry_size,
     uint32_t stripe_width, uint32_t entries_per_object, uint32_t num_stripes)
 {
-  zlog_proto::ViewInitOp call;
+  zlog_ceph_proto::ViewInitOp call;
   call.mutable_params()->set_entry_size(entry_size);
   call.mutable_params()->set_stripe_width(stripe_width);
   call.mutable_params()->set_entries_per_object(entries_per_object);
@@ -62,7 +62,7 @@ void view_init(librados::ObjectWriteOperation& op, uint32_t entry_size,
 
 void view_read(librados::ObjectReadOperation& op, uint64_t min_epoch)
 {
-  zlog_proto::ViewReadOp call;
+  zlog_ceph_proto::ViewReadOp call;
   call.set_min_epoch(min_epoch);
   ceph::bufferlist in;
   cls_zlog::encode(in, call);
@@ -71,7 +71,7 @@ void view_read(librados::ObjectReadOperation& op, uint64_t min_epoch)
 
 void view_extend(librados::ObjectWriteOperation& op, uint64_t position)
 {
-  zlog_proto::ViewExtendOp call;
+  zlog_ceph_proto::ViewExtendOp call;
   call.set_position(position);
   ceph::bufferlist in;
   cls_zlog::encode(in, call);
