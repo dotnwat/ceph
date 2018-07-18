@@ -21,13 +21,26 @@ class TestCrash(MgrTestCase):
         self.crashes = dict()
         now = datetime.datetime.utcnow()
 
+        timestamps = []
         for i in (0, 1, 3, 4, 8):
-            timestamp = now - datetime.timedelta(days=i)
-            timestamp = timestamp.strftime(DATEFMT) + 'Z'
+            ts1 = now - datetime.timedelta(days=i)
+            # include some hourly offsets too to test finer grained json
+            # reporting. shift by an hour to not collide with days=0.
+            ts2 = now - datetime.timedelta(hours=i+1)
+            timestamps += map(lambda ts:
+                    ts.strftime(DATEFMT) + 'Z', (ts1, ts2))
+
+        i = 0
+        entity_types = ["osd", "mon", ""]
+        for timestamp in timestamps:
             crash_id = '_'.join((timestamp, UUID)).replace(' ', '_')
             self.crashes[crash_id] = {
-                'crash_id': crash_id, 'timestamp': timestamp,
+                'crash_id': crash_id,
+                'timestamp': timestamp,
+                'entity_name': "{}.{}".format(
+                    entity_types[i % len(entity_types)], i),
             }
+            i += 1
 
             self.assertEqual(
                 0,
@@ -90,7 +103,7 @@ class TestCrash(MgrTestCase):
         retstr = self.mgr_cluster.mon_manager.raw_cluster_cmd(
             'crash', 'stat',
         )
-        self.assertIn('5 crashes recorded', retstr)
+        self.assertIn('10 crashes recorded', retstr)
         self.assertIn('4 older than 1 days old:', retstr)
         self.assertIn('3 older than 3 days old:', retstr)
         self.assertIn('1 older than 7 days old:', retstr)
