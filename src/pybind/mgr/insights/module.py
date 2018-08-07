@@ -243,12 +243,6 @@ class Module(MgrModule):
         self._pending_health = []
         self._health_slot = None
 
-    def do_self_test(self, inbuf, command):
-        h = HealthCheckAccumulator()
-        assert h.checks() == {}
-
-        return 0, "", ""
-
     def do_health(self, inbuf, cmd):
         name = cmd['id']
         check = {
@@ -440,6 +434,9 @@ class Module(MgrModule):
                     "detail": [str(e)]
                 }
             }
+        else:
+            self.log.debug("Crash module invocation succeeded {}".format(
+                json.dumps(result["summary"], indent=2)))
 
         return result, health_checks
 
@@ -460,7 +457,10 @@ class Module(MgrModule):
         # health history
         report["health"] = self._health_report(HEALTH_HISTORY_HOURS)
 
-        #report["osd_dump"] = self.get("osd_map")
+        # osd_map = self.get("osd_map")
+        # del osd_map['pg_temp']
+        # report["osd_dump"] = osd_map
+
         #report["df"] = self.get("df")
         #report["osd_tree"] = self.get("osd_map_tree")
         #report["fs_map"] = self.get("fs_map")
@@ -475,6 +475,155 @@ class Module(MgrModule):
         #self.set_health_checks(health)
 
         return 0, "", json.dumps(report, indent=2, cls=HealthEncoder)
+
+    def do_self_test(self, inbuf, command):
+        # health checks accum initially empty reports empty
+        h = HealthCheckAccumulator()
+        assert h.checks() == {}
+        h = HealthCheckAccumulator({})
+        assert h.checks() == {}
+
+        # initialization with lists and tuples is OK
+        h = HealthCheckAccumulator({
+            "C0": {
+                "S0": {
+                    "summary": ["s0", "s1"],
+                    "detail": ("d0", "d1")
+                }
+            }
+        })
+        assert h.checks() == {
+            "C0": {
+                "S0": {
+                    "summary": set(["s0", "s1"]),
+                    "detail": set(["d0", "d1"])
+                }
+            }
+        }
+
+        # merging combines and de-duplicates
+        h.merge(HealthCheckAccumulator({
+            "C0": {
+                "S0": {
+                    "summary": ["s0", "s1", "s2"],
+                    "detail": ("d2",)
+                },
+                "S1": {
+                    "summary": ["s0", "s1", "s2"],
+                    "detail": ()
+                }
+            },
+            "C1": {
+                "S0": {
+                    "summary": [],
+                    "detail": ("d0", "d1", "d2")
+                }
+            }
+        }))
+
+        assert h.checks() == {
+            "C0": {
+                "S0": {
+                    "summary": set(["s0", "s1", "s2"]),
+                    "detail": set(["d0", "d1", "d2"])
+                },
+                "S1": {
+                    "summary": set(["s0", "s1", "s2"]),
+                    "detail": set([])
+                }
+            },
+            "C1": {
+                "S0": {
+                    "summary": set([]),
+                    "detail": set(["d0", "d1", "d2"])
+                }
+            }
+        }
+
+        # returns false when nothing changes
+        assert not h.add({})
+        assert not h.add({
+            "C0": {
+                "severity": "S0",
+                "summary": { "message": "s0" },
+                "detail": []
+            }
+        })
+        assert not h.add({
+            "C0": {
+                "severity": "S0",
+                "summary": { "message": "s1" },
+                "detail": [{ "message": "d1" }]
+            }
+        })
+        assert not h.add({
+            "C0": {
+                "severity": "S0",
+                "summary": { "message": "s0" },
+                "detail": [{ "message": "d1" }, { "message": "d2" }]
+            }
+        })
+
+        # new checks report change
+        assert h.add({
+            "C0": {
+                "severity": "S0",
+                "summary": { "message": "s3" },
+                "detail": []
+            }
+        })
+        assert h.add({
+            "C0": {
+                "severity": "S0",
+                "summary": { "message": "s1" },
+                "detail": [{ "message": "d4" }]
+            }
+        })
+        assert h.add({
+            "C0": {
+                "severity": "S2",
+                "summary": { "message": "s0" },
+                "detail": [{ "message": "d0" }]
+            }
+        })
+        assert h.add({
+            "C2": {
+                "severity": "S0",
+                "summary": { "message": "s0" },
+                "detail": [{ "message": "d0" }, { "message": "d1" }]
+            }
+        })
+
+        assert h.checks() == {
+            "C0": {
+                "S0": {
+                    "summary": set(["s0", "s1", "s2", "s3"]),
+                    "detail": set(["d0", "d1", "d2", "d4"])
+                },
+                "S1": {
+                    "summary": set(["s0", "s1", "s2"]),
+                    "detail": set([])
+                },
+                "S2": {
+                    "summary": set(["s0"]),
+                    "detail": set(["d0"])
+                }
+            },
+            "C1": {
+                "S0": {
+                    "summary": set([]),
+                    "detail": set(["d0", "d1", "d2"])
+                }
+            },
+            "C2": {
+                "S0": {
+                    "summary": set(["s0"]),
+                    "detail": set(["d0", "d1"])
+                }
+            }
+        }
+
+        return 0, "", ""
 
     def handle_command(self, inbuf, command):
         if command["prefix"] == "insights":
