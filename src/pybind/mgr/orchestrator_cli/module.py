@@ -123,7 +123,38 @@ class OrchestratorCli(orchestrator.OrchestratorClientMixin, MgrModule):
             "cmd": "orchestrator status",
             "desc": "Report configured backend and its status",
             "perm": "r"
-        }
+        },
+        {
+            'cmd': "orchestrator host add "
+                   "name=host,type=CephString,req=true",
+            "desc": "Add a host",
+            "perm": "rw"
+        },
+        {
+            'cmd': "orchestrator host rm "
+                   "name=host,type=CephString,req=true",
+            "desc": "Remove a host",
+            "perm": "rw"
+        },
+        {
+            'cmd': "orchestrator host ls",
+            "desc": "List hosts",
+            "perm": "r"
+        },
+        {
+            'cmd': "orchestrator mgr update "
+                   "name=num,type=CephInt,req=true "
+                   "name=hosts,type=CephString,n=N,req=false",
+            "desc": "Update the number of manager instances",
+            "perm": "rw"
+        },
+        {
+            'cmd': "orchestrator mon update "
+                   "name=num,type=CephInt,req=true "
+                   "name=hosts,type=CephString,n=N,req=false",
+            "desc": "Update the number of monitor instances",
+            "perm": "rw"
+        },
     ]
 
     def _select_orchestrator(self):
@@ -133,6 +164,23 @@ class OrchestratorCli(orchestrator.OrchestratorClientMixin, MgrModule):
 
         return o
 
+    def _add_host(self, cmd):
+        host = cmd["host"]
+        completion = self.add_host(host)
+        self._orchestrator_wait([completion])
+        return HandleCommandResult(stdout="Success.")
+
+    def _remove_host(self, cmd):
+        host = cmd["host"]
+        completion = self.remove_host(host)
+        self._orchestrator_wait([completion])
+        return HandleCommandResult(stdout="Success.")
+
+    def _get_hosts(self):
+        completion = self.get_hosts()
+        self._orchestrator_wait([completion])
+        result = "\n".join(map(lambda node: node.name, completion.result))
+        return HandleCommandResult(stdout=result)
 
     def _list_devices(self, cmd):
         """
@@ -336,6 +384,51 @@ Usage:
 
         return HandleCommandResult()
 
+    def _update_mgrs(self, cmd):
+        num = cmd["num"]
+        hosts = cmd.get("hosts", [])
+
+        if num <= 0:
+            return HandleCommandResult(-errno.EINVAL,
+                    stderr="Invalid number of mgrs: require {} > 0".format(num))
+
+        completion = self.update_mgrs(num, hosts)
+        self._orchestrator_wait([completion])
+
+        # FIXME: Success?
+        return HandleCommandResult(stdout="Success.")
+
+    def _update_mons(self, cmd):
+        num = cmd["num"]
+        hosts = cmd.get("hosts", [])
+
+        if num <= 0:
+            return HandleCommandResult(-errno.EINVAL,
+                    stderr="Invalid number of mons: require {} > 0".format(num))
+
+        def split_host(host):
+            """Split host into host and network parts"""
+            # TODO: stricter validation
+            parts = host.split(":")
+            if len(parts) == 1:
+                return (parts[0], None)
+            elif len(parts) == 2:
+                return (parts[0], parts[1])
+            else:
+                raise RuntimeError("Invalid host specification: "
+                        "'{}'".format(host))
+
+        if hosts:
+            try:
+                hosts = list(map(split_host, hosts))
+            except Exception as e:
+                msg = "Failed to parse host list: '{}': {}".format(hosts, e)
+                return HandleCommandResult(-errno.EINVAL, stderr=msg)
+
+        completion = self.update_mons(num, hosts)
+        self._orchestrator_wait([completion])
+        return HandleCommandResult(stdout=str(completion.result))
+
     def _set_backend(self, cmd):
         """
         We implement a setter command instead of just having the user
@@ -444,5 +537,15 @@ Usage:
             return self._create_osd(inbuf, cmd)
         elif cmd['prefix'] == "orchestrator osd remove":
             return self._remove_osd(cmd)
+        elif cmd['prefix'] == "orchestrator host add":
+            return self._add_host(cmd)
+        elif cmd['prefix'] == "orchestrator host rm":
+            return self._remove_host(cmd)
+        elif cmd['prefix'] == "orchestrator host ls":
+            return self._get_hosts()
+        elif cmd['prefix'] == "orchestrator mgr update":
+            return self._update_mgrs(cmd)
+        elif cmd['prefix'] == "orchestrator mon update":
+            return self._update_mons(cmd)
         else:
             raise NotImplementedError()
