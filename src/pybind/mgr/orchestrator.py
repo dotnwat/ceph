@@ -161,6 +161,30 @@ class Orchestrator(object):
         """
         raise NotImplementedError()
 
+    def add_host(self, host):
+        """
+        Add a host to the orchestrator inventory.
+
+        :param host: hostname
+        """
+        raise NotImplementedError()
+
+    def remote_host(self, host):
+        """
+        Remove a host from the orchestrator inventory.
+
+        :param host: hostname
+        """
+        raise NotImplementedError()
+
+    def get_hosts(self):
+        """
+        Report the hosts in the cluster.
+
+        :return: list of InventoryNode
+        """
+        raise NotImplementedError()
+
     def get_inventory(self, node_filter=None):
         """
 
@@ -210,6 +234,24 @@ class Orchestrator(object):
 
         Note that this can only remove OSDs that were successfully
         created (i.e. got an OSD ID).
+        """
+        raise NotImplementedError()
+
+    def update_mgrs(self, num, hosts):
+        """
+        Update the number of cluster managers.
+
+        :param num: requested number of managers.
+        :param hosts: list of hosts (optional)
+        """
+        raise NotImplementedError()
+
+    def update_mons(self, num, hosts):
+        """
+        Update the number of cluster monitors.
+
+        :param num: requested number of monitors.
+        :param hosts: list of hosts (optional)
         """
         raise NotImplementedError()
 
