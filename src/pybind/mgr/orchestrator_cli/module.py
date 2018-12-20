@@ -64,7 +64,38 @@ class OrchestratorCli(MgrModule):
             "cmd": "orchestrator status",
             "desc": "Report configured backend and its status",
             "perm": "r"
-        }
+        },
+        {
+            'cmd': "orchestrator host add "
+                   "name=host,type=CephString,req=true",
+            "desc": "Add a host",
+            "perm": "rw"
+        },
+        {
+            'cmd': "orchestrator host rm "
+                   "name=host,type=CephString,req=true",
+            "desc": "Remove a host",
+            "perm": "rw"
+        },
+        {
+            'cmd': "orchestrator host ls",
+            "desc": "List hosts",
+            "perm": "r"
+        },
+        {
+            'cmd': "orchestrator mgr update "
+                   "name=num,type=CephInt,req=true "
+                   "name=hosts,type=CephString,n=N,req=false",
+            "desc": "Update the number of manager instances",
+            "perm": "rw"
+        },
+        {
+            'cmd': "orchestrator mon update "
+                   "name=num,type=CephInt,req=true "
+                   "name=hosts,type=CephString,n=N,req=false",
+            "desc": "Update the number of monitor instances",
+            "perm": "rw"
+        },
     ]
 
     def _select_orchestrator(self):
@@ -98,6 +129,24 @@ class OrchestratorCli(MgrModule):
 
         if all(hasattr(c, 'error') and getattr(c, 'error')for c in completions):
             raise Exception([getattr(c, 'error') for c in completions])
+
+    def _add_host(self, cmd):
+        host = cmd["host"]
+        completion = self._oremote("add_host", host)
+        self._wait([completion])
+        return HandleCommandResult(rs="Success.")
+
+    def _remove_host(self, cmd):
+        host = cmd["host"]
+        completion = self._oremote("remove_host", host)
+        self._wait([completion])
+        return HandleCommandResult(rs="Success.")
+
+    def _list_hosts(self):
+        completion = self._oremote("get_hosts")
+        self._wait([completion])
+        result = "\n".join(map(lambda node: node.name, completion.result))
+        return HandleCommandResult(odata=result)
 
     def _list_devices(self, cmd):
         """
@@ -243,6 +292,30 @@ class OrchestratorCli(MgrModule):
         self._wait([completion])
         return HandleCommandResult()
 
+    def _update_mgrs(self, cmd):
+        num = cmd["num"]
+        hosts = cmd.get("hosts", [])
+
+        if num <= 0:
+            return HandleCommandResult(-errno.EINVAL,
+                    rs="Invalid number of mgrs: require {} > 0".format(num))
+
+        completion = self._oremote("update_mgrs", num, hosts)
+        self._wait([completion])
+        return HandleCommandResult(rs="Success.")
+
+    def _update_mons(self, cmd):
+        num = cmd["num"]
+        hosts = cmd.get("hosts", [])
+
+        if num <= 0:
+            return HandleCommandResult(-errno.EINVAL,
+                    rs="Invalid number of mons: require {} > 0".format(num))
+
+        completion = self._oremote("update_mons", num, hosts)
+        self._wait([completion])
+        return HandleCommandResult(rs="Success.")
+
     def _set_backend(self, cmd):
         """
         We implement a setter command instead of just having the user
@@ -332,6 +405,16 @@ class OrchestratorCli(MgrModule):
             return self._set_backend(cmd)
         elif cmd['prefix'] == "orchestrator status":
             return self._status()
+        elif cmd['prefix'] == "orchestrator host add":
+            return self._add_host(cmd)
+        elif cmd['prefix'] == "orchestrator host rm":
+            return self._remove_host(cmd)
+        elif cmd['prefix'] == "orchestrator host ls":
+            return self._list_hosts()
+        elif cmd['prefix'] == "orchestrator mgr update":
+            return self._update_mgrs(cmd)
+        elif cmd['prefix'] == "orchestrator mon update":
+            return self._update_mons(cmd)
         else:
             raise NotImplementedError()
 
