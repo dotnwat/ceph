@@ -341,3 +341,26 @@ TEST(cls_rgw, test_log_trim)
   /* destroy pool */
   ASSERT_EQ(0, destroy_one_pool_pp(pool_name, rados));
 }
+
+TEST(cls_rgw, retry) {
+  librados::Rados rados;
+  librados::IoCtx ioctx;
+  string pool_name = get_temp_pool_name();
+
+  ASSERT_EQ("", create_one_pool_pp(pool_name, rados));
+  ASSERT_EQ(0, rados.ioctx_create(pool_name.c_str(), ioctx));
+
+  int ret = ioctx.create("obj", true);
+  ASSERT_EQ(ret, 0);
+
+  char bytes[10];
+  ceph::bufferlist bl;
+  bl.append(bytes, sizeof(bytes));
+
+  librados::ObjectReadOperation op;
+  op.exec("log", "view_read2", bl);
+  ret = ioctx.operate("obj", &op, &bl);
+  ASSERT_EQ(ret, 0);
+
+  ASSERT_EQ(0, destroy_one_pool_pp(pool_name, rados));
+}

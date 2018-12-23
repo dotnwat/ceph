@@ -294,6 +294,15 @@ static int cls_log_info(cls_method_context_t hctx, bufferlist *in, bufferlist *o
   return 0;
 }
 
+static int view_read(cls_method_context_t hctx, ceph::bufferlist *in,
+    ceph::bufferlist *out)
+{
+  char bytes[24];
+  out->append(bytes, sizeof(bytes));
+
+  return 0;
+}
+
 CLS_INIT(log)
 {
   CLS_LOG(1, "Loaded log class!");
@@ -303,6 +312,7 @@ CLS_INIT(log)
   cls_method_handle_t h_log_list;
   cls_method_handle_t h_log_trim;
   cls_method_handle_t h_log_info;
+  cls_method_handle_t h_view_read;
 
   cls_register("log", &h_class);
 
@@ -311,6 +321,10 @@ CLS_INIT(log)
   cls_register_cxx_method(h_class, "list", CLS_METHOD_RD, cls_log_list, &h_log_list);
   cls_register_cxx_method(h_class, "trim", CLS_METHOD_RD | CLS_METHOD_WR, cls_log_trim, &h_log_trim);
   cls_register_cxx_method(h_class, "info", CLS_METHOD_RD, cls_log_info, &h_log_info);
+
+  cls_register_cxx_method(h_class, "view_read2",
+      CLS_METHOD_RD,
+      view_read, &h_view_read);
 
   return;
 }
