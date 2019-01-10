@@ -134,19 +134,19 @@ class OrchestratorCli(MgrModule):
         host = cmd["host"]
         completion = self._oremote("add_host", host)
         self._wait([completion])
-        return HandleCommandResult(rs="Success.")
+        return HandleCommandResult(stdout="Success.")
 
     def _remove_host(self, cmd):
         host = cmd["host"]
         completion = self._oremote("remove_host", host)
         self._wait([completion])
-        return HandleCommandResult(rs="Success.")
+        return HandleCommandResult(stdout="Success.")
 
     def _list_hosts(self):
         completion = self._oremote("get_hosts")
         self._wait([completion])
         result = "\n".join(map(lambda node: node.name, completion.result))
-        return HandleCommandResult(odata=result)
+        return HandleCommandResult(stdout=result)
 
     def _list_devices(self, cmd):
         """
@@ -298,11 +298,11 @@ class OrchestratorCli(MgrModule):
 
         if num <= 0:
             return HandleCommandResult(-errno.EINVAL,
-                    rs="Invalid number of mgrs: require {} > 0".format(num))
+                    stderr="Invalid number of mgrs: require {} > 0".format(num))
 
         completion = self._oremote("update_mgrs", num, hosts)
         self._wait([completion])
-        return HandleCommandResult(rs="Success.")
+        return HandleCommandResult(stdout="Success.")
 
     def _update_mons(self, cmd):
         num = cmd["num"]
@@ -310,11 +310,11 @@ class OrchestratorCli(MgrModule):
 
         if num <= 0:
             return HandleCommandResult(-errno.EINVAL,
-                    rs="Invalid number of mons: require {} > 0".format(num))
+                    stderr="Invalid number of mons: require {} > 0".format(num))
 
         completion = self._oremote("update_mons", num, hosts)
         self._wait([completion])
-        return HandleCommandResult(rs="Success.")
+        return HandleCommandResult(stdout="Success.")
 
     def _set_backend(self, cmd):
         """
