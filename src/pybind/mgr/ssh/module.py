@@ -2,11 +2,12 @@ import json
 import errno
 import six
 import os
+import tempfile
 
 from mgr_module import MgrModule
 import orchestrator
 
-import remotes
+from . import remotes
 
 try:
     import remoto
@@ -19,6 +20,7 @@ except ImportError as e:
 # - batch osd creation
 # - osd spec for filestore, wal-db, etc...
 # - handling dmcrypt and zapping etc...
+# - better handling of ssh_config like cleaning up and reusing tmp ssh_config file
 
 # setup
 #  1. prepare bootstrap keys
@@ -188,10 +190,22 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         :param host: the remote host
         :return: the connection object
         """
+        ssh_config = self.get_store("conf.ssh_config")
+        if ssh_config:
+            self.ssh_config_file = tempfile.NamedTemporaryFile()
+            self.ssh_config_file.write(ssh_config.encode('utf-8'))
+            self.ssh_config_file.flush()
+            ssh_options = "-F {}".format(self.ssh_config_file.name)
+        else:
+            ssh_options = None
+
         conn = remoto.Connection(host,
                 logger=self.log,
-                detect_sudo=True)
+                detect_sudo=True,
+                ssh_options=ssh_options)
+
         conn.import_module(remotes)
+
         return conn
 
     def _executable_path(self, conn, executable):
@@ -219,12 +233,15 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         ]
         out, err, code = remoto.process.check(conn, command)
         try:
-            # TODO: ceph-volume is dumping parts of the error log to stdout, so
-            # parsing the json is not robust. turns out the json generally lands as
-            # the last element in the output, so it will work for this POC but need
-            # to coordinate with alfredo on this behavior.
             out = out[-1]
-            return json.loads(b''.join(out).decode('utf-8'))
+
+            # FIXME: invalid json hack for ceph-volume output
+            out = out.decode('utf-8')
+            out = out.replace("'", '"')
+            out = out.replace("False", "\"false\"")
+            out = out.replace("True", "\"true\"")
+
+            return json.loads(out)
         except ValueError:
             return {}
 

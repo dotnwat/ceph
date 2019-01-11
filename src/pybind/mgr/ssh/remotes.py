@@ -33,7 +33,7 @@ def write_keyring(path, key, overwrite=False, uid=-1, gid=-1):
     if not overwrite and os.path.exists(path):
         return
     with open(path, "wb") as f:
-        f.write(key)
+        f.write(key.encode('utf-8'))
 
 def create_mon_path(path, uid=-1, gid=-1):
     """create the mon path if it does not exist"""
