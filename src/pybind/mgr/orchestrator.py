@@ -194,7 +194,7 @@ class Orchestrator(object):
         """
         raise NotImplementedError()
 
-    def remote_host(self, host):
+    def remove_host(self, host):
         # type: (str) -> WriteCompletion
         """
         Remove a host from the orchestrator inventory.
