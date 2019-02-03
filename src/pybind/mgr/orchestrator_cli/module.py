@@ -22,7 +22,7 @@ class OrchestratorCli(orchestrator.OrchestratorClientMixin, MgrModule):
     COMMANDS = [
         {
             'cmd': "orchestrator device ls "
-                   "name=host,type=CephString,req=false"
+                   "name=host,type=CephString,req=false "
                    "name=format,type=CephChoices,strings=json|plain,req=false ",
             "desc": "List devices on a node",
             "perm": "r"
