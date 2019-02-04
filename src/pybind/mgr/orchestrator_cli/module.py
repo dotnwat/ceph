@@ -126,7 +126,8 @@ class OrchestratorCli(orchestrator.OrchestratorClientMixin, MgrModule):
         },
         {
             'cmd': "orchestrator host add "
-                   "name=host,type=CephString,req=true",
+                   "name=host,type=CephString,req=true "
+                   "name=labels,type=CephString,n=N,req=false",
             "desc": "Add a host",
             "perm": "rw"
         },
@@ -166,7 +167,8 @@ class OrchestratorCli(orchestrator.OrchestratorClientMixin, MgrModule):
 
     def _add_host(self, cmd):
         host = cmd["host"]
-        completion = self.add_host(host)
+        labels = cmd.get("labels", [])
+        completion = self.add_host(host, labels)
         self._orchestrator_wait([completion])
         return HandleCommandResult(stdout="Success.")
 

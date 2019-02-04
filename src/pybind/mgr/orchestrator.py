@@ -186,8 +186,8 @@ class Orchestrator(object):
         """
         raise NotImplementedError()
 
-    def add_host(self, host):
-        # type: (str) -> WriteCompletion
+    def add_host(self, host, labels):
+        # type: (str, List[str]) -> WriteCompletion
         """
         Add a host to the orchestrator inventory.
         :param host: hostname
