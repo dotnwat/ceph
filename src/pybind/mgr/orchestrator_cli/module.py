@@ -170,13 +170,15 @@ class OrchestratorCli(orchestrator.OrchestratorClientMixin, MgrModule):
         labels = cmd.get("labels", [])
         completion = self.add_host(host, labels)
         self._orchestrator_wait([completion])
-        return HandleCommandResult(stdout="Success.")
+        result = "\n".join(map(lambda r: str(r), completion.result))
+        return HandleCommandResult(stdout=result)
 
     def _remove_host(self, cmd):
         host = cmd["host"]
         completion = self.remove_host(host)
         self._orchestrator_wait([completion])
-        return HandleCommandResult(stdout="Success.")
+        result = "\n".join(map(lambda r: str(r), completion.result))
+        return HandleCommandResult(stdout=result)
 
     def _get_hosts(self):
         completion = self.get_hosts()
@@ -397,8 +399,7 @@ Usage:
         completion = self.update_mgrs(num, hosts)
         self._orchestrator_wait([completion])
 
-        # FIXME: Success?
-        return HandleCommandResult(stdout="Success.")
+        return HandleCommandResult(stdout=str(completion.result))
 
     def _update_mons(self, cmd):
         num = cmd["num"]
