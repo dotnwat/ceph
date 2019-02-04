@@ -70,7 +70,12 @@ class SSHWriteCompletion(orchestrator.WriteCompletion):
 
     @property
     def is_errored(self):
-        return not all(map(lambda r: r.successful(), self._result))
+        for r in self._result:
+            if not r.ready():
+                return False
+            if not r.successful():
+                return True
+        return False
 
 class SSHWriteCompletionReady(SSHWriteCompletion):
     def __init__(self, result):
