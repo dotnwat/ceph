@@ -1,3 +1,4 @@
+# ceph-deploy ftw
 import os
 import errno
 import tempfile

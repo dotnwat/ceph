@@ -20,9 +20,6 @@ except ImportError as e:
 #  - bring over some of the protections from ceph-deploy that guard against
 #    multiple bootstrapping / initialization
 
-# TODO
-# - remote module
-
 class SSHReadCompletion(orchestrator.ReadCompletion):
     def __init__(self, result):
         if isinstance(result, multiprocessing.pool.AsyncResult):
