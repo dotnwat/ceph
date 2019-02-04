@@ -398,8 +398,8 @@ Usage:
 
         completion = self.update_mgrs(num, hosts)
         self._orchestrator_wait([completion])
-
-        return HandleCommandResult(stdout=str(completion.result))
+        result = "\n".join(map(lambda r: str(r), completion.result))
+        return HandleCommandResult(stdout=result)
 
     def _update_mons(self, cmd):
         num = cmd["num"]
@@ -430,7 +430,8 @@ Usage:
 
         completion = self.update_mons(num, hosts)
         self._orchestrator_wait([completion])
-        return HandleCommandResult(stdout=str(completion.result))
+        result = "\n".join(map(lambda r: str(r), completion.result))
+        return HandleCommandResult(stdout=result)
 
     def _set_backend(self, cmd):
         """
