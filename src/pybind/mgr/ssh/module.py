@@ -2,7 +2,6 @@ import json
 import errno
 import six
 import os
-import tempfile
 import multiprocessing.pool
 
 from mgr_module import MgrModule
@@ -21,6 +20,9 @@ except ImportError as e:
 #  - bring over some of the protections from ceph-deploy that guard against
 #    multiple bootstrapping / initialization
 
+# TODO
+# - remote module
+
 class SSHReadCompletion(orchestrator.ReadCompletion):
     def __init__(self, result):
         if isinstance(result, multiprocessing.pool.AsyncResult):
@@ -31,9 +33,6 @@ class SSHReadCompletion(orchestrator.ReadCompletion):
 
     @property
     def result(self):
-        # TODO: need to handle failures here better. if the cb failed then get()
-        # will also re-raise the exception...
-        # filter out errors?
         return list(map(lambda r: r.get(), self._result))
 
     @property
@@ -54,7 +53,30 @@ class SSHReadCompletionReady(SSHReadCompletion):
 
 class SSHWriteCompletion(orchestrator.WriteCompletion):
     def __init__(self, result):
-        super(SSHWriteCompletion, self).__init__()
+        if isinstance(result, multiprocessing.pool.AsyncResult):
+            self._result = [result]
+        else:
+            self._result = result
+        assert isinstance(self._result, list)
+
+    @property
+    def result(self):
+        return list(map(lambda r: r.get(), self._result))
+
+    @property
+    def is_persistent(self):
+        return all(map(lambda r: r.ready(), self._result))
+
+    @property
+    def is_effective(self):
+        return all(map(lambda r: r.ready(), self._result))
+
+    @property
+    def is_errored(self):
+        return not all(map(lambda r: r.successful(), self._result))
+
+class SSHWriteCompletionReady(SSHWriteCompletion):
+    def __init__(self, result):
         self._result = result
 
     @property
@@ -73,49 +95,9 @@ class SSHWriteCompletion(orchestrator.WriteCompletion):
     def is_errored(self):
         return False
 
-class SSHWriteCompletion2(orchestrator.WriteCompletion):
-    def __init__(self, result):
-        super(SSHWriteCompletion2, self).__init__()
-        self._result = result
-
-    @property
-    def result(self):
-        return self._result.get()
-
-    @property
-    def is_persistent(self):
-        return self._result.ready()
-
-    @property
-    def is_effective(self):
-        return self._result.ready()
-
-    @property
-    def is_errored(self):
-        return False
-
-class SSHWriteCompletion3(orchestrator.WriteCompletion):
-    def __init__(self, results):
-        super(SSHWriteCompletion3, self).__init__()
-        self._results = results
-
-    @property
-    def result(self):
-        return "ok"
-
-    @property
-    def is_persistent(self):
-        return all(map(lambda r: r.ready(), self._results))
-
-    @property
-    def is_effective(self):
-        return all(map(lambda r: r.ready(), self._results))
-
-    @property
-    def is_errored(self):
-        return False
-
 class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
+
+    _STORE_HOST_PREFIX = "host"
 
     MODULE_OPTIONS = [
         {'name': 'ssh_config'},
@@ -313,21 +295,32 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         return keyring_path
 
     def _hostname_to_store_key(self, host):
-        return "host.{}".format(host)
+        return "{}.{}".format(self._STORE_HOST_PREFIX, host)
 
-    def add_host(self, host):
+    def _get_all_hosts(self):
+        hosts = six.iteritems(self.get_store_prefix(self._STORE_HOST_PREFIX))
+        return list(map(lambda kv: (kv[0], json.loads(kv[1])), hosts))
+
+    def add_host(self, host, labels):
         """
         Add a host to be managed by the orchestrator.
 
         :param host: host name
+        :param labels: host labels
         """
-        def run(host):
-            # TODO: what should the return value be...
+        def run(host, labels):
+            assert isinstance(labels, list)
+            labels = list(set(labels))
             key = self._hostname_to_store_key(host)
-            self.set_store(key, host)
+            self.set_store(key, json.dumps({
+                "host": host,
+                "labels": labels
+            }))
+            return "Added host '{}' with labels '{}'".format(
+                host, ",".join(labels))
 
         return SSHWriteCompletion(
-            self._worker_pool.apply_async(run, (host,)))
+            self._worker_pool.apply_async(run, (host, labels)))
 
     def remove_host(self, host):
         """
@@ -336,9 +329,9 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         :param host: host name
         """
         def run(host):
-            # TODO: what should the return value be...
             key = self._hostname_to_store_key(host)
             self.set_store(key, None)
+            return "Removed host '{}'".format(host)
 
         return SSHWriteCompletion(
             self._worker_pool.apply_async(run, (host,)))
@@ -349,10 +342,13 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
 
         Notes:
           - skip async: manager reads from cache.
+
+        TODO:
+          - InventoryNode probably needs to be able to report labels
         """
         nodes = []
-        for host_info in six.iteritems(self.get_store_prefix("host.")):
-            node = orchestrator.InventoryNode(host_info[1], [])
+        for key, host_info in self._get_all_hosts():
+            node = orchestrator.InventoryNode(host_info["host"], [])
             nodes.append(node)
         return SSHReadCompletionReady(nodes)
 
@@ -399,12 +395,13 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
 
         TODO:
           - add inventory caching
+          - add filtering by label
         """
         if node_filter:
             hosts = node_filter.nodes
         else:
-            hosts = six.iteritems(self.get_store_prefix("host."))
-            hosts = list(map(lambda h: h[1], hosts)) # extract hostname
+            hosts = self._get_all_hosts()
+            hosts = list(map(lambda h: h[1]["host"], hosts)) # extract hostname
 
         self._require_hosts(hosts)
 
@@ -437,12 +434,13 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
                 ]
                 remoto.process.run(conn, command)
 
+            return "Created osd on host '{}'".format(host)
+
         except:
             raise
 
         finally:
             conn.exit()
-            return "done ok"
 
     def create_osds(self, drive_group, all_hosts=None):
         """
@@ -468,7 +466,7 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         result = self._worker_pool.apply_async(self._create_osd, (host,
                 drive_group))
 
-        return SSHWriteCompletion2(result)
+        return SSHWriteCompletion(result)
 
     def _create_mon(self, host, network):
         """
@@ -540,6 +538,8 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
                 timeout=7,
             )
 
+            return "Created mon on host '{}'".format(host)
+
         except Exception as e:
             self.log.error("create_mon({}:{}): error: {}".format(host, network, e))
             raise
@@ -547,8 +547,6 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         finally:
             self.log.info("create_mon({}:{}): finished".format(host, network))
             conn.exit()
-
-        return "foo"
 
     def update_mons(self, num, hosts):
         """
@@ -558,7 +556,7 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         mon_map = self.get("mon_map")
         num_mons = len(mon_map["mons"])
         if num == num_mons:
-            return SSHWriteCompletion("The requested number of monitors exist.")
+            return SSHWriteCompletionReady("The requested number of monitors exist.")
         if num < num_mons:
             raise NotImplementedError("Removing monitors is not supported.")
 
@@ -588,7 +586,7 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
                 network))
             results.append(result)
 
-        return SSHWriteCompletion3(results)
+        return SSHWriteCompletion(results)
 
     def _create_mgr(self, host):
         """
@@ -636,6 +634,8 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
                 timeout=7
             )
 
+            return "Created mgr on host '{}'".format(host)
+
         except Exception as e:
             self.log.error("create_mgr({}): error: {}".format(host, e))
             raise
@@ -653,7 +653,7 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         num_mgrs = 1 if mgr_map["active_name"] else 0
         num_mgrs += len(mgr_map["standbys"])
         if num == num_mgrs:
-            return SSHWriteCompletion("The requested number of managers exist.")
+            return SSHWriteCompletionReady("The requested number of managers exist.")
         if num < num_mgrs:
             raise NotImplementedError("Removing managers is not supported")
 
@@ -676,4 +676,4 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
             result = self._worker_pool.apply_async(self._create_mgr, (hosts[i],))
             results.append(result)
 
-        return SSHWriteCompletion3(results)
+        return SSHWriteCompletion(results)
