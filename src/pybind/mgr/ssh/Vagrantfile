@@ -1,49 +1,25 @@
+# vi: set ft=ruby :
+
+NUM_DAEMONS = ENV["NUM_DAEMONS"] ? ENV["NUM_DAEMONS"].to_i : 1
+
 Vagrant.configure("2") do |config|
   config.vm.synced_folder ".", "/vagrant", disabled: true
   config.vm.network "private_network", type: "dhcp"
   config.vm.box = "centos/7"
 
-  config.vm.define "mon0" do |mon|
-    mon.vm.hostname = "mon0"
-  end
-  config.vm.define "mon1" do |mon|
-    mon.vm.hostname = "mon1"
-  end
-  config.vm.define "mon2" do |mon|
-    mon.vm.hostname = "mon2"
-  end
-
-  config.vm.define "mgr0" do |mgr|
-    mgr.vm.hostname = "mgr0"
-  end
-  config.vm.define "mgr1" do |mgr|
-    mgr.vm.hostname = "mgr1"
-  end
-  config.vm.define "mgr2" do |mgr|
-    mgr.vm.hostname = "mgr2"
-  end
-
-  config.vm.define "osd0" do |osd|
-    osd.vm.hostname = "osd0"
-    osd.vm.provider :libvirt do |libvirt|
-      libvirt.storage :file, :size => '5G'
-      libvirt.storage :file, :size => '5G'
+  (0..NUM_DAEMONS - 1).each do |i|
+    config.vm.define "mon#{i}" do |mon|
+      mon.vm.hostname = "mon#{i}"
     end
-  end
-
-  config.vm.define "osd1" do |osd|
-    osd.vm.hostname = "osd1"
-    osd.vm.provider :libvirt do |libvirt|
-      libvirt.storage :file, :size => '5G'
-      libvirt.storage :file, :size => '5G'
+    config.vm.define "mgr#{i}" do |mgr|
+      mgr.vm.hostname = "mgr#{i}"
     end
-  end
-
-  config.vm.define "osd2" do |osd|
-    osd.vm.hostname = "osd2"
-    osd.vm.provider :libvirt do |libvirt|
-      libvirt.storage :file, :size => '5G'
-      libvirt.storage :file, :size => '5G'
+    config.vm.define "osd#{i}" do |osd|
+      osd.vm.hostname = "osd#{i}"
+      osd.vm.provider :libvirt do |libvirt|
+        libvirt.storage :file, :size => '5G'
+        libvirt.storage :file, :size => '5G'
+      end
     end
   end
 
