@@ -296,26 +296,22 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         hosts = six.iteritems(self.get_store_prefix(self._STORE_HOST_PREFIX))
         return list(map(lambda kv: (kv[0], json.loads(kv[1])), hosts))
 
-    def add_host(self, host, labels):
+    def add_host(self, host):
         """
         Add a host to be managed by the orchestrator.
 
         :param host: host name
         :param labels: host labels
         """
-        def run(host, labels):
-            assert isinstance(labels, list)
-            labels = list(set(labels))
+        def run(host):
             key = self._hostname_to_store_key(host)
             self.set_store(key, json.dumps({
                 "host": host,
-                "labels": labels
             }))
-            return "Added host '{}' with labels '{}'".format(
-                host, ",".join(labels))
+            return "Added host '{}'".format(host)
 
         return SSHWriteCompletion(
-            self._worker_pool.apply_async(run, (host, labels)))
+            self._worker_pool.apply_async(run, (host,)))
 
     def remove_host(self, host):
         """
