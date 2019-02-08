@@ -168,7 +168,8 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
             hosts = [hosts]
         unregistered_hosts = []
         for host in hosts:
-            if not self.get_store("host.{}".format(host)):
+            key = self._hostname_to_store_key(host)
+            if not self.get_store(key):
                 unregistered_hosts.append(host)
         if unregistered_hosts:
             raise RuntimeError("Host(s) {} not registered".format(
