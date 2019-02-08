@@ -2,6 +2,7 @@ import json
 import errno
 import six
 import os
+import datetime
 import multiprocessing.pool
 
 from mgr_module import MgrModule
@@ -15,6 +16,8 @@ try:
 except ImportError as e:
     remoto = None
     remoto_import_error = str(e)
+
+DATEFMT = '%Y-%m-%d %H:%M:%S.%f'
 
 # high-level TODO:
 #  - bring over some of the protections from ceph-deploy that guard against
@@ -100,9 +103,11 @@ class SSHWriteCompletionReady(SSHWriteCompletion):
 class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
 
     _STORE_HOST_PREFIX = "host"
+    _DEFAULT_INVENTORY_CACHE_TIMEOUT_MIN = 10
 
     MODULE_OPTIONS = [
         {'name': 'ssh_config'},
+        {'name': 'inventory_cache_timeout_min'},
     ]
 
     def __init__(self, *args, **kwargs):
@@ -139,6 +144,12 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
             complete = False
 
         return complete
+
+    @staticmethod
+    def time_from_string(timestr):
+        # drop the 'Z' timezone indication, it's always UTC
+        timestr = timestr.rstrip('Z')
+        return datetime.datetime.strptime(timestr, DATEFMT)
 
     def _get_cluster_fsid(self):
         """
@@ -292,9 +303,18 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
     def _hostname_to_store_key(self, host):
         return "{}.{}".format(self._STORE_HOST_PREFIX, host)
 
-    def _get_all_hosts(self):
-        hosts = six.iteritems(self.get_store_prefix(self._STORE_HOST_PREFIX))
-        return list(map(lambda kv: (kv[0], json.loads(kv[1])), hosts))
+    def _get_hosts(self, wanted=None):
+        if wanted:
+            hosts_info = []
+            for host in wanted:
+                key = self._hostname_to_store_key(host)
+                info = self.get_store(key)
+                if info:
+                    hosts_info.append((key, info))
+        else:
+            hosts_info = six.iteritems(self.get_store_prefix(self._STORE_HOST_PREFIX))
+
+        return list(map(lambda kv: (kv[0], json.loads(kv[1])), hosts_info))
 
     def add_host(self, host):
         """
@@ -307,6 +327,8 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
             key = self._hostname_to_store_key(host)
             self.set_store(key, json.dumps({
                 "host": host,
+                "inventory": None,
+                "last_inventory_refresh": None
             }))
             return "Added host '{}'".format(host)
 
@@ -338,7 +360,7 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
           - InventoryNode probably needs to be able to report labels
         """
         nodes = []
-        for key, host_info in self._get_all_hosts():
+        for key, host_info in self._get_hosts():
             node = orchestrator.InventoryNode(host_info["host"], [])
             nodes.append(node)
         return SSHReadCompletionReady(nodes)
@@ -360,17 +382,8 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
             ]
 
             out, err, code = remoto.process.check(conn, command)
-
-            devices = []
             host_devices = json.loads(out[0])
-            for dev_info in host_devices:
-                dev = orchestrator.InventoryDevice()
-                dev.blank = dev_info["available"]
-                dev.id = dev_info["path"]
-                dev.size = dev_info["sys_api"]["size"]
-                dev.extended = dev_info
-                devices.append(dev)
-            return devices
+            return host_devices
 
         except:
             raise
@@ -378,31 +391,74 @@ class SSHOrchestrator(MgrModule, orchestrator.Orchestrator):
         finally:
             conn.exit()
 
-    def get_inventory(self, node_filter=None):
+    def _cv_output_to_inventory_device(self, cv_output):
+        devices = []
+        for dev_info in cv_output:
+            dev = orchestrator.InventoryDevice()
+            dev.blank = dev_info["available"]
+            dev.id = dev_info["path"]
+            dev.size = dev_info["sys_api"]["size"]
+            dev.extended = dev_info
+            devices.append(dev)
+        return devices
+
+    def get_inventory(self, node_filter=None, refresh=False):
         """
         Return the storage inventory of nodes matching the given filter.
 
         :param node_filter: node filter
 
         TODO:
-          - add inventory caching
           - add filtering by label
         """
         if node_filter:
             hosts = node_filter.nodes
+            self._require_hosts(hosts)
+            hosts = self._get_hosts(hosts)
         else:
-            hosts = self._get_all_hosts()
-            hosts = list(map(lambda h: h[1]["host"], hosts)) # extract hostname
+            # this implies the returned hosts are registered
+            hosts = self._get_hosts()
 
-        self._require_hosts(hosts)
+        def run(key, host_info):
+            updated = False
+            host = host_info["host"]
 
-        def run(host):
-            devices = self._get_device_inventory(host)
+            if not host_info["inventory"]:
+                self.log.info("caching inventory for '{}'".format(host))
+                host_info["inventory"] = self._get_device_inventory(host)
+                updated = True
+            else:
+                timeout_min = int(self.get_module_option(
+                    "inventory_cache_timeout_min",
+                    self._DEFAULT_INVENTORY_CACHE_TIMEOUT_MIN))
+
+                cutoff = datetime.datetime.utcnow() - datetime.timedelta(
+                        minutes=timeout_min)
+
+                last_update = self.time_from_string(host_info["last_inventory_refresh"])
+
+                if last_update < cutoff or refresh:
+                    self.log.info("refresh stale inventory for '{}'".format(host))
+                    host_info["inventory"] = self._get_device_inventory(host)
+                    updated = True
+                else:
+                    self.log.info("reading cached inventory for '{}'".format(host))
+                    pass
+
+            if updated:
+                now = datetime.datetime.utcnow()
+                now = now.strftime(DATEFMT)
+                host_info["last_inventory_refresh"] = now
+                self.set_store(key, json.dumps(host_info))
+
+            devices = self._cv_output_to_inventory_device(
+                    host_info["inventory"])
+
             return orchestrator.InventoryNode(host, devices)
 
         results = []
-        for host in hosts:
-            result = self._worker_pool.apply_async(run, (host,))
+        for key, host_info in hosts:
+            result = self._worker_pool.apply_async(run, (key, host_info))
             results.append(result)
 
         return SSHReadCompletion(results)
